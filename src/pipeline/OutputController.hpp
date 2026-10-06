@@ -27,6 +27,14 @@ struct obs_encoder;
 typedef struct obs_encoder obs_encoder_t;
 struct calldata;
 typedef struct calldata calldata_t;
+struct obs_scene;
+typedef struct obs_scene obs_scene_t;
+struct obs_scene_item;
+typedef struct obs_scene_item obs_sceneitem_t;
+struct obs_view;
+typedef struct obs_view obs_view_t;
+struct video_output;
+typedef struct video_output video_t;
 
 namespace smulti {
 
@@ -156,6 +164,13 @@ public:
 	const std::string &endpoint_id() const { return m_endpoint.id; }
 
 	/**
+	 * Refresh the source used by the rotated vertical view.  Called on
+	 * OBS_FRONTEND_EVENT_SCENE_CHANGED so Studio Mode follows Program,
+	 * not Preview.
+	 */
+	void refresh_program_scene();
+
+	/**
 	 * SampleData — the small set of stat fields HealthSampler needs, read
 	 * under a single short m_mutex lock so the sampler never dereferences
 	 * m_output while shutdown_blocking() is concurrently tearing it down.
@@ -230,6 +245,11 @@ private:
 	void do_release_encoders_locked();
 	void do_create_output();
 
+	/** Configure normal/stretch/rotated video source for a fresh encoder. */
+	bool configure_video_pipeline(obs_encoder_t *encoder);
+	bool ensure_rotated_pipeline();
+	void destroy_rotated_pipeline();
+
 	Endpoint            m_endpoint;
 	EncoderFactory      m_factory;
 	ControllerReaper   &m_reaper;
@@ -242,6 +262,13 @@ private:
 	obs_output_t       *m_output   {nullptr};
 	obs_encoder_t      *m_video_enc{nullptr};
 	obs_encoder_t      *m_audio_enc{nullptr};
+
+	/* Dedicated render path for Vertical1080x1920Rotated.  Kept for the
+	 * controller lifetime so manual stop/start can reuse it cheaply. */
+	obs_scene_t        *m_rotated_scene {nullptr};
+	obs_sceneitem_t    *m_rotated_item  {nullptr};
+	obs_view_t         *m_rotated_view  {nullptr};
+	video_t            *m_rotated_video {nullptr};
 
 	std::chrono::steady_clock::time_point m_connected_since{};
 
