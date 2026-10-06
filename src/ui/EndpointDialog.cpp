@@ -30,7 +30,7 @@ const std::vector<EndpointDialog::ServerTemplate> EndpointDialog::s_templates = 
 	{ QStringLiteral("Custom RTMP"),           QStringLiteral("") },
 	{ QStringLiteral("Twitch"),                QStringLiteral("rtmp://live.twitch.tv/app") },
 	{ QStringLiteral("YouTube"),               QStringLiteral("rtmp://a.rtmp.youtube.com/live2") },
-	{ QStringLiteral("Facebook"),              QStringLiteral("rtmps://live-api-s.facebook.com:443/rtmp") },
+	{ QStringLiteral("Facebook"),              QStringLiteral("rtmps://rtmp-api.facebook.com:443/rtmp/") },
 	{ QStringLiteral("TikTok"),                QStringLiteral("rtmp://push-rtmp.tiktokcdn.com/live") },
 	{ QStringLiteral("Kick"),                  QStringLiteral("rtmp://ingest.global-contribute.live-video.net/app") },
 	{ QStringLiteral("Trovo"),                 QStringLiteral("rtmp://livepush.trovo.live/push") },
