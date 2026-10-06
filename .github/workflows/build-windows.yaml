@@ -65,7 +65,7 @@ jobs:
   release:
     name: Publish Release
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'publish-v1.0.11'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'publish-v1.1.0'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -86,8 +86,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.11
-          name: StreamMulticast v1.0.11 - OBS 32.2.2
+          tag_name: v1.1.0
+          name: StreamMulticast v1.1.0 - OBS 32.2.2
           target_commitish: ${{ github.sha }}
           files: '*.zip'
           generate_release_notes: true
