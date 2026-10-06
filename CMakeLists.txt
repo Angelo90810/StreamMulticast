@@ -37,7 +37,7 @@ if(ENABLE_QT)
   # The obs-deps Qt6 ships with broken INTERFACE_INCLUDE_DIRECTORIES propagation
   # for some configurations. We hardcode the include search paths directly
   # to guarantee that <QtWidgets/QWidget> and <QWidget> both resolve.
-  set(_OBSDEPS_QT6 "${CMAKE_CURRENT_SOURCE_DIR}/.deps/obs-deps-qt6-2025-07-11-x64")
+  set(_OBSDEPS_QT6 "${CMAKE_CURRENT_SOURCE_DIR}/.deps/obs-deps-qt6-2026-07-15-x64")
   if(EXISTS "${_OBSDEPS_QT6}/include")
     target_include_directories(
       ${CMAKE_PROJECT_NAME}
