@@ -65,7 +65,7 @@ jobs:
   release:
     name: Publish Release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'release: publish v1.0.8')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -86,6 +86,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v1.0.8
+          name: StreamMulticast v1.0.8 - OBS 32.2.2
+          target_commitish: ${{ github.sha }}
           files: '*.zip'
           generate_release_notes: true
-          draft: true
+          draft: false
+          prerelease: false
