@@ -271,6 +271,12 @@ bool OutputController::start()
 		return false;
 	}
 
+	/* Bind the encoders to OBS's active media pipelines before attaching
+	 * them to an encoded output.  obs_output_start() cannot initialize an
+	 * encoder that has no video/audio source assigned. */
+	obs_encoder_set_video(video_enc, obs_get_video());
+	obs_encoder_set_audio(audio_enc, obs_get_audio());
+
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		m_video_enc = video_enc;
@@ -770,6 +776,11 @@ void OutputController::reconnect_thread_func()
 		 * handed to the ControllerReaper.  If invalid, release the
 		 * just-created, not-yet-attached encoders and exit without touching
 		 * shared state further — the reaper owns the captured output now. */
+		/* Re-created encoders also need explicit media binding before
+		 * re-attaching them to the encoded RTMP output. */
+		obs_encoder_set_video(video_enc, obs_get_video());
+		obs_encoder_set_audio(audio_enc, obs_get_audio());
+
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
 			if (m_stop_reconnect.load() || m_output != captured_output) {
