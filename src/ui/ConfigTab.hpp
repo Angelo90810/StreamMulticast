@@ -12,20 +12,14 @@ GPLv2 — see LICENSE for full text.
 #include <QtWidgets/QWidget>
 #include <QtWidgets/QListWidget>
 #include <QtWidgets/QPushButton>
-#include <QtWidgets/QScrollArea>
-#include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QCheckBox>
+#include <QtCore/QTimer>
 
 namespace smulti {
 
-/**
- * EndpointCard — compact widget representing one endpoint in the ConfigTab.
- *
- * Shows: name, status LED (colour square), enabled toggle, Edit button.
- * Emits editRequested(id) when user clicks Edit.
- * Emits enableToggled(id, enabled) when toggle changes.
- */
+enum class OutputState : int;
+
 class EndpointCard : public QWidget {
 	Q_OBJECT
 
@@ -33,43 +27,29 @@ public:
 	explicit EndpointCard(const Endpoint &ep, QWidget *parent = nullptr);
 
 	void update_state(const Endpoint &ep);
+	void update_runtime(OutputState state, const std::string &last_error);
 	const std::string &endpoint_id() const { return m_id; }
 
 signals:
 	void editRequested(const std::string &id);
 	void enableToggled(const std::string &id, bool enabled);
 	void deleteRequested(const std::string &id);
+	void manualStartStopRequested(const std::string &id);
 
 private:
 	void setup_ui();
 
-	std::string  m_id;
-	Endpoint     m_ep;
+	std::string m_id;
+	Endpoint m_ep;
 
-	QLabel      *m_name_label   {nullptr};
-	QLabel      *m_status_led   {nullptr};
-	QCheckBox   *m_enabled_cb   {nullptr};
-	QPushButton *m_edit_btn     {nullptr};
-	QPushButton *m_delete_btn   {nullptr};
+	QLabel *m_name_label {nullptr};
+	QLabel *m_status_led {nullptr};
+	QCheckBox *m_enabled_cb {nullptr};
+	QPushButton *m_start_stop_btn {nullptr};
+	QPushButton *m_edit_btn {nullptr};
+	QPushButton *m_delete_btn {nullptr};
 };
 
-/**
- * ConfigTab — Tab 2 of the MultistreamDock.
- *
- * Displays a vertical list of EndpointCard widgets in a QScrollArea.
- * A QListWidget wrapper handles drag-to-reorder (drops are mapped to
- * EndpointRegistry::reorder() calls).
- *
- * "Add Endpoint" button at the bottom opens EndpointDialog with a fresh endpoint.
- *
- * Subscribes to EndpointRegistry observer notifications for live updates.
- *
- * AVANATRO-VERIFY: Drag-to-reorder via QListWidget — we use a QListWidget
- * whose items are mapped to EndpointCard widgets via QListWidgetItem::setSizeHint
- * + setItemWidget.  This pattern works but prevents custom drag visuals.
- * An alternative is QAbstractItemModel with DragDropMode.  Current impl is
- * functional but basic — upgrade noted for v1.1.
- */
 class ConfigTab : public QWidget {
 	Q_OBJECT
 
@@ -82,7 +62,9 @@ private slots:
 	void on_edit_endpoint(const std::string &id);
 	void on_toggle_endpoint(const std::string &id, bool enabled);
 	void on_delete_endpoint(const std::string &id);
+	void on_manual_start_stop(const std::string &id);
 	void on_list_reorder();
+	void refresh_runtime_states();
 
 private:
 	void setup_ui();
@@ -90,9 +72,9 @@ private:
 	void on_registry_changed(ChangeKind kind, const Endpoint &ep);
 
 	EndpointRegistry &m_registry;
-
-	QListWidget  *m_list       {nullptr};
-	QPushButton  *m_add_btn    {nullptr};
+	QListWidget *m_list {nullptr};
+	QPushButton *m_add_btn {nullptr};
+	QTimer *m_runtime_timer {nullptr};
 
 	int m_observer_token = -1;
 };
