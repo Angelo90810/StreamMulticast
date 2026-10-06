@@ -13,7 +13,7 @@ permissions:
 
 env:
   PLUGIN_NAME: StreamMulticast
-  QT_VERSION: 6.5.3
+  QT_VERSION: 6.11.1
 
 jobs:
   build:
