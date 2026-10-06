@@ -60,7 +60,7 @@ std::string EncoderFactory::encoder_type_id(EncoderBackend backend)
 {
 	switch (backend) {
 	case EncoderBackend::X264:  return "obs_x264";
-	case EncoderBackend::NVENC: return "jim_nvenc";       // preferred; fallback: "ffmpeg_nvenc"
+	case EncoderBackend::NVENC: return "obs_nvenc_h264_tex"; // OBS 31+/32 native NVENC H.264
 	case EncoderBackend::QSV:   return "obs_qsv11_v2";
 	case EncoderBackend::AMF:   return "h264_texture_amf";
 	default:                    return "obs_x264";
@@ -99,7 +99,8 @@ std::vector<EncoderBackend> EncoderFactory::available_backends()
 	result.push_back(EncoderBackend::X264);
 
 	/* Check GPU encoders — preferred IDs first, then fallbacks */
-	if (is_encoder_available("jim_nvenc") || is_encoder_available("ffmpeg_nvenc"))
+	if (is_encoder_available("obs_nvenc_h264_tex") || is_encoder_available("jim_nvenc") ||
+	    is_encoder_available("ffmpeg_nvenc"))
 		result.push_back(EncoderBackend::NVENC);
 
 	if (is_encoder_available("obs_qsv11_v2") || is_encoder_available("obs_qsv11"))
@@ -127,10 +128,12 @@ obs_encoder_t *EncoderFactory::create_video_encoder(const Endpoint &ep,
 	/* Resolve actual type ID with fallback */
 	std::string type_id = encoder_type_id(ep.encoder_backend);
 
-	/* NVENC fallback chain: jim_nvenc → ffmpeg_nvenc */
+	/* OBS 32 native NVENC first; legacy IDs are fallback only. */
 	if (ep.encoder_backend == EncoderBackend::NVENC &&
 	    !is_encoder_available(type_id)) {
-		type_id = "ffmpeg_nvenc";
+		type_id = "jim_nvenc";
+		if (!is_encoder_available(type_id))
+			type_id = "ffmpeg_nvenc";
 		if (!is_encoder_available(type_id)) {
 			obs_log(LOG_WARNING,
 			        "EncoderFactory: NVENC not available — falling back to x264");
@@ -170,12 +173,16 @@ obs_encoder_t *EncoderFactory::create_video_encoder(const Endpoint &ep,
 		obs_data_set_int   (settings, "buffer_size", ep.video_bitrate_kbps);
 	}
 
-	/* NVENC-specific */
-	if (type_id == "jim_nvenc" || type_id == "ffmpeg_nvenc") {
-		obs_data_set_string(settings, "preset",  "hq");
-		obs_data_set_string(settings, "profile", "high");
-		obs_data_set_int   (settings, "bf",      2); // B-frames
-		obs_data_set_int   (settings, "buffer_size", ep.video_bitrate_kbps);
+	/* NVENC-specific. OBS 32 uses the native texture encoder and p1..p7 presets. */
+	if (type_id == "obs_nvenc_h264_tex" || type_id == "jim_nvenc" ||
+	    type_id == "ffmpeg_nvenc") {
+		obs_data_set_string(settings, "rate_control", "CBR");
+		obs_data_set_string(settings, "preset",       "p5");
+		obs_data_set_string(settings, "multipass",    "qres");
+		obs_data_set_string(settings, "tune",         "hq");
+		obs_data_set_string(settings, "profile",      "high");
+		obs_data_set_bool  (settings, "adaptive_quantization", true);
+		obs_data_set_int   (settings, "bf",           2);
 	}
 
 	std::string encoder_name = name_hint + "_video_" + ep.id;
