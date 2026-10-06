@@ -10,6 +10,8 @@ GPLv2 — see LICENSE for full text.
 
 #include <obs.h>
 #include <obs-data.h>
+#include <obs-output.h>
+#include <obs-frontend-api.h>
 
 #include <set>
 
@@ -17,31 +19,12 @@ namespace smulti {
 
 namespace {
 
-/* -----------------------------------------------------------------------
- * available_encoder_ids — the set of encoder type IDs obs_enum_encoder_types
- * reports, computed once.
- *
- * L2 perf fix: is_encoder_available() used to re-walk the entire
- * obs_enum_encoder_types() registry on every call — up to 2x per
- * create_video_encoder() (NVENC/QSV/AMF fallback checks) plus once more on
- * every reconnect attempt (reconnect_thread_func() calls create_video_encoder()
- * again). Encoder availability is fixed for the process lifetime once
- * obs_startup() has registered all encoder modules, so it only needs to be
- * enumerated once.
- *
- * Thread safety: is_encoder_available() is called from both the Qt UI thread
- * (OutputController::start()) and each endpoint's reconnect thread
- * (OutputController::reconnect_thread_func()). A function-local static is
- * safe here without an explicit mutex/std::call_once — C++11 guarantees
- * thread-safe, exactly-once initialization of function-local statics (a
- * "magic static"), and this set is never mutated after construction.
- * ----------------------------------------------------------------------- */
 const std::set<std::string> &available_encoder_ids()
 {
 	static const std::set<std::string> ids = [] {
 		std::set<std::string> result;
-		size_t      idx = 0;
-		const char *id  = nullptr;
+		size_t idx = 0;
+		const char *id = nullptr;
 		while (obs_enum_encoder_types(idx++, &id)) {
 			if (id)
 				result.insert(id);
@@ -51,16 +34,23 @@ const std::set<std::string> &available_encoder_ids()
 	return ids;
 }
 
-} // anonymous namespace
+} // namespace
 
-/* -----------------------------------------------------------------------
- * Encoder type ID strings
- * ----------------------------------------------------------------------- */
-std::string EncoderFactory::encoder_type_id(EncoderBackend backend)
+std::string EncoderFactory::encoder_type_id(EncoderBackend backend, VideoCodec codec)
 {
+	if (codec == VideoCodec::HEVC) {
+		switch (backend) {
+		case EncoderBackend::NVENC: return "obs_nvenc_hevc_tex";
+		case EncoderBackend::QSV:   return "obs_qsv11_hevc";
+		case EncoderBackend::AMF:   return "h265_texture_amf";
+		case EncoderBackend::X264:  return {};
+		default:                    return {};
+		}
+	}
+
 	switch (backend) {
 	case EncoderBackend::X264:  return "obs_x264";
-	case EncoderBackend::NVENC: return "obs_nvenc_h264_tex"; // OBS 31+/32 native NVENC H.264
+	case EncoderBackend::NVENC: return "obs_nvenc_h264_tex";
 	case EncoderBackend::QSV:   return "obs_qsv11_v2";
 	case EncoderBackend::AMF:   return "h264_texture_amf";
 	default:                    return "obs_x264";
@@ -74,170 +64,213 @@ std::string EncoderFactory::backend_label(EncoderBackend backend)
 	case EncoderBackend::NVENC: return "NVENC (NVIDIA GPU)";
 	case EncoderBackend::QSV:   return "QSV (Intel GPU)";
 	case EncoderBackend::AMF:   return "AMF (AMD GPU)";
-	default:                    return "x264 (Software)";
+	default:                    return "Unknown";
 	}
 }
 
-/* -----------------------------------------------------------------------
- * is_encoder_available — membership check against the cached encoder-ID
- * set (see available_encoder_ids() above for the one-time
- * obs_enum_encoder_types() enumeration this reads from).
- * ----------------------------------------------------------------------- */
-bool EncoderFactory::is_encoder_available(const std::string &type_id)
+std::string EncoderFactory::codec_label(VideoCodec codec)
 {
-	return available_encoder_ids().count(type_id) != 0;
+	return codec == VideoCodec::HEVC ? "H.265 / HEVC" : "H.264 / AVC";
 }
 
-/* -----------------------------------------------------------------------
- * available_backends()
- * ----------------------------------------------------------------------- */
-std::vector<EncoderBackend> EncoderFactory::available_backends()
+bool EncoderFactory::is_encoder_available(const std::string &type_id)
+{
+	return !type_id.empty() && available_encoder_ids().count(type_id) != 0;
+}
+
+std::string EncoderFactory::resolve_encoder_type(EncoderBackend backend, VideoCodec codec)
+{
+	std::string preferred = encoder_type_id(backend, codec);
+	if (is_encoder_available(preferred))
+		return preferred;
+
+	if (backend == EncoderBackend::NVENC) {
+		if (codec == VideoCodec::HEVC) {
+			if (is_encoder_available("ffmpeg_hevc_nvenc"))
+				return "ffmpeg_hevc_nvenc";
+		} else {
+			if (is_encoder_available("jim_nvenc"))
+				return "jim_nvenc";
+			if (is_encoder_available("ffmpeg_nvenc"))
+				return "ffmpeg_nvenc";
+		}
+	}
+
+	if (backend == EncoderBackend::QSV && codec == VideoCodec::H264 &&
+	    is_encoder_available("obs_qsv11"))
+		return "obs_qsv11";
+
+	return {};
+}
+
+std::vector<EncoderBackend> EncoderFactory::available_backends(VideoCodec codec)
 {
 	std::vector<EncoderBackend> result;
-
-	/* x264 is always available in stock OBS builds */
-	result.push_back(EncoderBackend::X264);
-
-	/* Check GPU encoders — preferred IDs first, then fallbacks */
-	if (is_encoder_available("obs_nvenc_h264_tex") || is_encoder_available("jim_nvenc") ||
-	    is_encoder_available("ffmpeg_nvenc"))
-		result.push_back(EncoderBackend::NVENC);
-
-	if (is_encoder_available("obs_qsv11_v2") || is_encoder_available("obs_qsv11"))
-		result.push_back(EncoderBackend::QSV);
-
-	if (is_encoder_available("h264_texture_amf") || is_encoder_available("ffmpeg_amf"))
-		result.push_back(EncoderBackend::AMF);
-
+	for (EncoderBackend backend : {
+		EncoderBackend::X264,
+		EncoderBackend::NVENC,
+		EncoderBackend::QSV,
+		EncoderBackend::AMF,
+	}) {
+		if (!resolve_encoder_type(backend, codec).empty())
+			result.push_back(backend);
+	}
 	return result;
 }
 
-/* -----------------------------------------------------------------------
- * create_video_encoder()
- *
- * AVANATRO-VERIFY: obs_video_encoder_create signature.
- * OBS 30.x: obs_encoder_t* obs_video_encoder_create(
- *   const char *id, const char *name,
- *   obs_data_t *settings, obs_data_t *hotkey_data);
- * Some OBS 31.x builds add a "mixer_idx" param — check obs-encoder.h.
- * Using 4-arg form here (no mixer index) for broadest compatibility.
- * ----------------------------------------------------------------------- */
+obs_encoder_t *EncoderFactory::clone_obs_video_encoder(const Endpoint &ep,
+                                                        const std::string &name_hint) const
+{
+	obs_output_t *main_output = obs_frontend_get_streaming_output();
+	if (!main_output) {
+		obs_log(LOG_ERROR, "EncoderFactory: OBS streaming output is unavailable");
+		return nullptr;
+	}
+
+	obs_encoder_t *source = obs_output_get_video_encoder(main_output);
+	if (!source) {
+		obs_output_release(main_output);
+		obs_log(LOG_ERROR, "EncoderFactory: OBS streaming video encoder is unavailable");
+		return nullptr;
+	}
+
+	const char *type_id = obs_encoder_get_id(source);
+	obs_data_t *settings = obs_encoder_get_settings(source);
+	std::string encoder_name = name_hint + "_video_" + ep.id;
+
+	obs_encoder_t *enc = nullptr;
+	if (type_id && *type_id && settings) {
+		enc = obs_video_encoder_create(type_id, encoder_name.c_str(), settings, nullptr);
+	}
+
+	if (settings)
+		obs_data_release(settings);
+	obs_output_release(main_output);
+
+	if (!enc) {
+		obs_log(LOG_ERROR, "EncoderFactory: failed to clone OBS streaming video encoder");
+		return nullptr;
+	}
+
+	obs_encoder_set_video(enc, obs_get_video());
+	obs_log(LOG_INFO,
+	        "EncoderFactory: cloned OBS video encoder '%s' (type=%s)",
+	        encoder_name.c_str(), type_id ? type_id : "(unknown)");
+	return enc;
+}
+
+obs_encoder_t *EncoderFactory::clone_obs_audio_encoder(const Endpoint &ep,
+                                                        const std::string &name_hint) const
+{
+	obs_output_t *main_output = obs_frontend_get_streaming_output();
+	if (!main_output) {
+		obs_log(LOG_ERROR, "EncoderFactory: OBS streaming output is unavailable for audio clone");
+		return nullptr;
+	}
+
+	obs_encoder_t *source = obs_output_get_audio_encoder(main_output, 0);
+	if (!source) {
+		obs_output_release(main_output);
+		obs_log(LOG_ERROR, "EncoderFactory: OBS streaming audio encoder is unavailable");
+		return nullptr;
+	}
+
+	const char *type_id = obs_encoder_get_id(source);
+	obs_data_t *settings = obs_encoder_get_settings(source);
+	std::string encoder_name = name_hint + "_audio_" + ep.id;
+
+	obs_encoder_t *enc = nullptr;
+	if (type_id && *type_id && settings) {
+		enc = obs_audio_encoder_create(type_id, encoder_name.c_str(), settings, 0, nullptr);
+	}
+
+	if (settings)
+		obs_data_release(settings);
+	obs_output_release(main_output);
+
+	if (!enc) {
+		obs_log(LOG_ERROR, "EncoderFactory: failed to clone OBS streaming audio encoder");
+		return nullptr;
+	}
+
+	obs_encoder_set_audio(enc, obs_get_audio());
+	obs_log(LOG_INFO,
+	        "EncoderFactory: cloned OBS audio encoder '%s' (type=%s)",
+	        encoder_name.c_str(), type_id ? type_id : "(unknown)");
+	return enc;
+}
+
 obs_encoder_t *EncoderFactory::create_video_encoder(const Endpoint &ep,
                                                      const std::string &name_hint) const
 {
-	/* Resolve actual type ID with fallback */
-	std::string type_id = encoder_type_id(ep.encoder_backend);
+	if (ep.video_settings_mode == EncoderSettingsMode::UseOBS)
+		return clone_obs_video_encoder(ep, name_hint);
 
-	/* OBS 32 native NVENC first; legacy IDs are fallback only. */
-	if (ep.encoder_backend == EncoderBackend::NVENC &&
-	    !is_encoder_available(type_id)) {
-		type_id = "jim_nvenc";
-		if (!is_encoder_available(type_id))
-			type_id = "ffmpeg_nvenc";
-		if (!is_encoder_available(type_id)) {
-			obs_log(LOG_WARNING,
-			        "EncoderFactory: NVENC not available — falling back to x264");
-			type_id = "obs_x264";
-		}
+	std::string type_id = resolve_encoder_type(ep.encoder_backend, ep.video_codec);
+	if (type_id.empty()) {
+		obs_log(LOG_ERROR,
+		        "EncoderFactory: no %s encoder available for backend %s",
+		        codec_label(ep.video_codec).c_str(),
+		        backend_label(ep.encoder_backend).c_str());
+		return nullptr;
 	}
 
-	/* QSV fallback */
-	if (ep.encoder_backend == EncoderBackend::QSV &&
-	    !is_encoder_available(type_id)) {
-		type_id = "obs_qsv11";
-		if (!is_encoder_available(type_id)) {
-			obs_log(LOG_WARNING,
-			        "EncoderFactory: QSV not available — falling back to x264");
-			type_id = "obs_x264";
-		}
-	}
-
-	/* AMF fallback */
-	if (ep.encoder_backend == EncoderBackend::AMF &&
-	    !is_encoder_available(type_id)) {
-		obs_log(LOG_WARNING,
-		        "EncoderFactory: AMF not available — falling back to x264");
-		type_id = "obs_x264";
-	}
-
-	/* Build encoder settings */
 	obs_data_t *settings = obs_data_create();
 	obs_data_set_int(settings, "bitrate", ep.video_bitrate_kbps);
 	obs_data_set_int(settings, "keyint_sec", ep.keyframe_interval_sec);
+	obs_data_set_string(settings, "rate_control", "CBR");
 
-	/* x264-specific: prefer "veryfast" preset for low-latency live streaming */
 	if (type_id == "obs_x264") {
 		obs_data_set_string(settings, "preset", "veryfast");
 		obs_data_set_string(settings, "profile", "high");
-		obs_data_set_string(settings, "tune",    "zerolatency");
-		obs_data_set_int   (settings, "buffer_size", ep.video_bitrate_kbps);
+		obs_data_set_string(settings, "tune", "zerolatency");
+		obs_data_set_int(settings, "buffer_size", ep.video_bitrate_kbps);
 	}
 
-	/* NVENC-specific. OBS 32 uses the native texture encoder and p1..p7 presets. */
-	if (type_id == "obs_nvenc_h264_tex" || type_id == "jim_nvenc" ||
-	    type_id == "ffmpeg_nvenc") {
-		obs_data_set_string(settings, "rate_control", "CBR");
-		obs_data_set_string(settings, "preset",       "p5");
-		obs_data_set_string(settings, "multipass",    "qres");
-		obs_data_set_string(settings, "tune",         "hq");
-		obs_data_set_string(settings, "profile",      "high");
-		obs_data_set_bool  (settings, "adaptive_quantization", true);
-		obs_data_set_int   (settings, "bf",           2);
+	if (type_id == "obs_nvenc_h264_tex" || type_id == "obs_nvenc_hevc_tex" ||
+	    type_id == "jim_nvenc" || type_id == "ffmpeg_nvenc" ||
+	    type_id == "ffmpeg_hevc_nvenc") {
+		obs_data_set_string(settings, "preset", "p5");
+		obs_data_set_string(settings, "multipass", "qres");
+		obs_data_set_string(settings, "tune", "hq");
+		if (ep.video_codec == VideoCodec::H264)
+			obs_data_set_string(settings, "profile", "high");
+		obs_data_set_bool(settings, "adaptive_quantization", true);
+		obs_data_set_int(settings, "bf", 2);
 	}
 
 	std::string encoder_name = name_hint + "_video_" + ep.id;
-	// AVANATRO-VERIFY: obs_video_encoder_create — confirm 4-arg signature in OBS 31.
 	obs_encoder_t *enc = obs_video_encoder_create(
-		type_id.c_str(),
-		encoder_name.c_str(),
-		settings,
-		nullptr /* hotkey_data */
-	);
-
+		type_id.c_str(), encoder_name.c_str(), settings, nullptr);
 	obs_data_release(settings);
 
 	if (!enc) {
-		obs_log(LOG_ERROR, "EncoderFactory: obs_video_encoder_create failed for type '%s'",
+		obs_log(LOG_ERROR,
+		        "EncoderFactory: obs_video_encoder_create failed for type '%s'",
 		        type_id.c_str());
 		return nullptr;
 	}
 
-	/* Attach to the main OBS video output (obs_get_video())
-	 * AVANATRO-VERIFY: obs_encoder_set_video — confirm this must be called
-	 * before obs_output_set_video_encoder, or whether set_video_encoder
-	 * does it internally.  Pattern from OBS source: set_video before attach. */
 	obs_encoder_set_video(enc, obs_get_video());
-
-	obs_log(LOG_INFO, "EncoderFactory: created video encoder '%s' (type=%s, bitrate=%d kbps)",
-	        encoder_name.c_str(), type_id.c_str(), ep.video_bitrate_kbps);
+	obs_log(LOG_INFO,
+	        "EncoderFactory: created video encoder '%s' (type=%s, codec=%s, bitrate=%d kbps)",
+	        encoder_name.c_str(), type_id.c_str(),
+	        codec_label(ep.video_codec).c_str(), ep.video_bitrate_kbps);
 	return enc;
 }
 
-/* -----------------------------------------------------------------------
- * create_audio_encoder()
- *
- * AVANATRO-VERIFY: obs_audio_encoder_create — the mixer_idx param (5th arg).
- * mixer_idx=0 means OBS's default audio mix (same as main stream output).
- * Confirm this is the correct way to grab shared OBS audio in OBS 31.x.
- * ----------------------------------------------------------------------- */
 obs_encoder_t *EncoderFactory::create_audio_encoder(const Endpoint &ep,
                                                      const std::string &name_hint) const
 {
+	if (ep.audio_settings_mode == EncoderSettingsMode::UseOBS)
+		return clone_obs_audio_encoder(ep, name_hint);
+
 	obs_data_t *settings = obs_data_create();
 	obs_data_set_int(settings, "bitrate", ep.audio_bitrate_kbps);
 
 	std::string encoder_name = name_hint + "_audio_" + ep.id;
-
-	// AVANATRO-VERIFY: obs_audio_encoder_create signature — 5 args in OBS 30:
-	// (id, name, settings, mixer_idx, hotkey_data).  Confirm OBS 31 is identical.
 	obs_encoder_t *enc = obs_audio_encoder_create(
-		"ffmpeg_aac",
-		encoder_name.c_str(),
-		settings,
-		0,       /* mixer_idx = 0 → main OBS audio mix */
-		nullptr  /* hotkey_data */
-	);
-
+		"ffmpeg_aac", encoder_name.c_str(), settings, 0, nullptr);
 	obs_data_release(settings);
 
 	if (!enc) {
@@ -246,8 +279,8 @@ obs_encoder_t *EncoderFactory::create_audio_encoder(const Endpoint &ep,
 	}
 
 	obs_encoder_set_audio(enc, obs_get_audio());
-
-	obs_log(LOG_INFO, "EncoderFactory: created audio encoder '%s' (%d kbps AAC)",
+	obs_log(LOG_INFO,
+	        "EncoderFactory: created audio encoder '%s' (%d kbps AAC)",
 	        encoder_name.c_str(), ep.audio_bitrate_kbps);
 	return enc;
 }
