@@ -56,7 +56,7 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 	if (event == OBS_FRONTEND_EVENT_STREAMING_STARTED) {
 		obs_log(LOG_INFO, "OBS main stream started — triggering linked endpoints");
 		for (auto &ep : g_registry->all()) {
-			if (ep.linked_to_main) {
+			if (ep.enabled && ep.linked_to_main) {
 				auto ctrl = g_registry->controller_for(ep.id);
 				if (ctrl && !ctrl->is_running())
 					ctrl->start();
@@ -65,11 +65,20 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 	} else if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPED) {
 		obs_log(LOG_INFO, "OBS main stream stopped — stopping linked endpoints");
 		for (auto &ep : g_registry->all()) {
-			if (ep.linked_to_main) {
+			if (ep.enabled && ep.linked_to_main) {
 				auto ctrl = g_registry->controller_for(ep.id);
 				if (ctrl && ctrl->is_running())
 					ctrl->stop();
 			}
+		}
+	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED) {
+		/* obs_frontend_get_current_scene() returns Program while Studio Mode
+		 * is active, so rotated vertical endpoints follow the actual live
+		 * scene rather than Preview. */
+		for (auto &ep : g_registry->all()) {
+			auto ctrl = g_registry->controller_for(ep.id);
+			if (ctrl)
+				ctrl->refresh_program_scene();
 		}
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
 		/* Graceful shutdown — stop all outputs before OBS tears down */
