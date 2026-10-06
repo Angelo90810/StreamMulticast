@@ -12,8 +12,10 @@ GPLv2 — see LICENSE for full text.
 #include <obs.h>
 #include <obs-output.h>
 #include <obs-data.h>
+#include <obs-frontend-api.h>
 #include <signal.h>
 #include <util/threading.h>
+#include <graphics/vec2.h>
 
 #include <chrono>
 #include <thread>
@@ -146,6 +148,149 @@ std::chrono::steady_clock::time_point OutputController::connected_since() const
 }
 
 /* -----------------------------------------------------------------------
+ * Rotated vertical pipeline
+ * ----------------------------------------------------------------------- */
+bool OutputController::ensure_rotated_pipeline()
+{
+	if (m_rotated_video && m_rotated_view && m_rotated_scene)
+		return true;
+
+	m_rotated_scene = obs_scene_create_private(("smulti_rotate_scene_" + m_endpoint.id).c_str());
+	if (!m_rotated_scene) {
+		obs_log(LOG_ERROR, "OutputController [%s]: failed to create rotated private scene",
+		        m_endpoint.name.c_str());
+		return false;
+	}
+
+	m_rotated_view = obs_view_create();
+	if (!m_rotated_view) {
+		obs_scene_release(m_rotated_scene);
+		m_rotated_scene = nullptr;
+		obs_log(LOG_ERROR, "OutputController [%s]: failed to create rotated view",
+		        m_endpoint.name.c_str());
+		return false;
+	}
+
+	obs_view_set_source(m_rotated_view, 0, obs_scene_get_source(m_rotated_scene));
+
+	struct obs_video_info ovi = {};
+	if (!obs_get_video_info(&ovi)) {
+		destroy_rotated_pipeline();
+		obs_log(LOG_ERROR, "OutputController [%s]: cannot read OBS video info",
+		        m_endpoint.name.c_str());
+		return false;
+	}
+
+	/* The auxiliary canvas itself is portrait.  The nested Program scene is
+	 * rotated 90 degrees inside it, preserving the complete 16:9 frame. */
+	ovi.base_width = 1080;
+	ovi.base_height = 1920;
+	ovi.output_width = 1080;
+	ovi.output_height = 1920;
+	ovi.scale_type = OBS_SCALE_BICUBIC;
+
+	m_rotated_video = obs_view_add2(m_rotated_view, &ovi);
+	if (!m_rotated_video) {
+		destroy_rotated_pipeline();
+		obs_log(LOG_ERROR, "OutputController [%s]: failed to create 1080x1920 rotated video mix",
+		        m_endpoint.name.c_str());
+		return false;
+	}
+
+	refresh_program_scene();
+	obs_log(LOG_INFO,
+	        "OutputController [%s]: rotated vertical view ready (1080x1920, Program +90deg)",
+	        m_endpoint.name.c_str());
+	return true;
+}
+
+void OutputController::refresh_program_scene()
+{
+	if (m_endpoint.orientation != OutputOrientation::Vertical1080x1920Rotated ||
+	    !m_rotated_scene)
+		return;
+
+	obs_source_t *program = obs_frontend_get_current_scene();
+	if (!program)
+		return;
+
+	if (m_rotated_item) {
+		obs_sceneitem_remove(m_rotated_item);
+		m_rotated_item = nullptr;
+	}
+
+	m_rotated_item = obs_scene_add(m_rotated_scene, program);
+	if (m_rotated_item) {
+		struct obs_video_info main_ovi = {};
+		obs_get_video_info(&main_ovi);
+
+		const float source_w = main_ovi.base_width > 0 ? static_cast<float>(main_ovi.base_width) : 1920.0f;
+		const float source_h = main_ovi.base_height > 0 ? static_cast<float>(main_ovi.base_height) : 1080.0f;
+
+		/* After +90deg rotation, source_h becomes portrait width and
+		 * source_w becomes portrait height. Scale each axis to exactly fill
+		 * 1080x1920 without cropping the landscape composition. */
+		struct vec2 scale;
+		vec2_set(&scale, 1080.0f / source_h, 1920.0f / source_w);
+		obs_sceneitem_set_scale(m_rotated_item, &scale);
+		obs_sceneitem_set_alignment(m_rotated_item, OBS_ALIGN_LEFT | OBS_ALIGN_TOP);
+		obs_sceneitem_set_rot(m_rotated_item, 90.0f);
+
+		struct vec2 pos;
+		vec2_set(&pos, 1080.0f, 0.0f);
+		obs_sceneitem_set_pos(m_rotated_item, &pos);
+	}
+
+	obs_source_release(program);
+}
+
+bool OutputController::configure_video_pipeline(obs_encoder_t *encoder)
+{
+	if (!encoder)
+		return false;
+
+	if (m_endpoint.orientation == OutputOrientation::Vertical1080x1920Rotated) {
+		if (!ensure_rotated_pipeline())
+			return false;
+		obs_encoder_set_video(encoder, m_rotated_video);
+		return true;
+	}
+
+	obs_encoder_set_video(encoder, obs_get_video());
+
+	if (m_endpoint.orientation == OutputOrientation::Vertical1080x1920Stretch) {
+		obs_encoder_set_scaled_size(encoder, 1080, 1920);
+		obs_encoder_set_gpu_scale_type(encoder, OBS_SCALE_BICUBIC);
+		obs_log(LOG_INFO,
+		        "OutputController [%s]: vertical STRETCH enabled (1080x1920)",
+		        m_endpoint.name.c_str());
+	}
+
+	return true;
+}
+
+void OutputController::destroy_rotated_pipeline()
+{
+	if (m_rotated_item) {
+		obs_sceneitem_remove(m_rotated_item);
+		m_rotated_item = nullptr;
+	}
+
+	if (m_rotated_view) {
+		obs_view_set_source(m_rotated_view, 0, nullptr);
+		obs_view_remove(m_rotated_view);
+		obs_view_destroy(m_rotated_view);
+		m_rotated_view = nullptr;
+		m_rotated_video = nullptr;
+	}
+
+	if (m_rotated_scene) {
+		obs_scene_release(m_rotated_scene);
+		m_rotated_scene = nullptr;
+	}
+}
+
+/* -----------------------------------------------------------------------
  * do_create_output — creates the obs_output_t with RTMP service settings.
  * ----------------------------------------------------------------------- */
 void OutputController::do_create_output()
@@ -212,6 +357,12 @@ void OutputController::do_create_output()
  * ----------------------------------------------------------------------- */
 bool OutputController::start()
 {
+	if (!m_endpoint.enabled) {
+		obs_log(LOG_WARNING, "OutputController [%s]: start ignored because endpoint is disabled",
+		        m_endpoint.name.c_str());
+		return false;
+	}
+
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		if (m_state == OutputState::Live || m_state == OutputState::Starting)
@@ -275,42 +426,22 @@ bool OutputController::start()
 		return false;
 	}
 
-	/* Bind the encoders to OBS's active media pipelines before attaching
-	 * them to an encoded output.  obs_output_start() cannot initialize an
-	 * encoder that has no video/audio source assigned. */
-	obs_encoder_set_video(video_enc, obs_get_video());
+	/* Bind media before output initialization.  The video helper selects
+	 * source-match, portrait stretch, or the dedicated rotated Program view. */
+	if (!configure_video_pipeline(video_enc)) {
+		obs_encoder_release(video_enc);
+		obs_encoder_release(audio_enc);
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_state = OutputState::FailedHard;
+		m_last_error = "Could not create endpoint video pipeline";
+		return false;
+	}
 	obs_encoder_set_audio(audio_enc, obs_get_audio());
 
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		m_video_enc = video_enc;
 		m_audio_enc = audio_enc;
-	}
-
-	/* -------------------------------------------------------------------
-	 * OBS 32 compatibility
-	 *
-	 * obs_output_set_video_conversion() is only valid for raw outputs.
-	 * StreamMulticast uses encoded RTMP outputs, so OBS 32 rejects the old
-	 * vertical path before the RTMP connection is even attempted.
-	 *
-	 * Configure scaling on the video encoder itself before initialization.
-	 * This is the supported libobs path for encoded outputs.
-	 * ------------------------------------------------------------------- */
-	if (m_endpoint.orientation == OutputOrientation::Vertical1080x1920Letterbox ||
-	    m_endpoint.orientation == OutputOrientation::Vertical1080x1920CenterCrop) {
-		obs_encoder_set_scaled_size(video_enc, 1080, 1920);
-		obs_encoder_set_gpu_scale_type(video_enc, OBS_SCALE_BICUBIC);
-		obs_log(LOG_INFO,
-		        "OutputController [%s]: vertical encoder scaling enabled (1080x1920)",
-		        m_endpoint.name.c_str());
-
-		if (m_endpoint.orientation == OutputOrientation::Vertical1080x1920CenterCrop) {
-			obs_log(LOG_WARNING,
-			        "OutputController [%s]: center-crop is not implemented; "
-			        "using the safe 1080x1920 encoder-rescale path.",
-			        m_endpoint.name.c_str());
-		}
 	}
 
 	obs_output_set_video_encoder(output, video_enc);
@@ -564,6 +695,8 @@ void OutputController::shutdown_blocking()
 
 	if (service_to_release)
 		obs_service_release(service_to_release);
+
+	destroy_rotated_pipeline();
 }
 
 /* -----------------------------------------------------------------------
@@ -787,15 +920,13 @@ void OutputController::reconnect_thread_func()
 		}
 
 		/* Session-validity guard #2 — immediately before obs_output_start().
-		 * This is the exact race Finding A.2 described: without this check,
-		 * a stop() that ran during encoder creation above could otherwise be
-		 * raced by obs_output_start() below on an output stop() has already
-		 * handed to the ControllerReaper.  If invalid, release the
-		 * just-created, not-yet-attached encoders and exit without touching
-		 * shared state further — the reaper owns the captured output now. */
-		/* Re-created encoders also need explicit media binding before
-		 * re-attaching them to the encoded RTMP output. */
-		obs_encoder_set_video(video_enc, obs_get_video());
+		 * Re-created encoders must be rebound to the endpoint's selected
+		 * render path before they are attached. */
+		if (!configure_video_pipeline(video_enc)) {
+			obs_encoder_release(video_enc);
+			obs_encoder_release(audio_enc);
+			continue;
+		}
 		obs_encoder_set_audio(audio_enc, obs_get_audio());
 
 		{
