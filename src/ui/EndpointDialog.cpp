@@ -6,7 +6,6 @@ GPLv2 — see LICENSE for full text.
 */
 
 #include "EndpointDialog.hpp"
-#include "../plugin-support.h"
 #include "../core/ObsServiceImport.hpp"
 #include "../core/TikTokBridgeImport.hpp"
 
@@ -15,192 +14,200 @@ GPLv2 — see LICENSE for full text.
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QMessageBox>
-#include <QtWidgets/QDialogButtonBox>
 #include <QtWidgets/QFileDialog>
 #include <QtCore/QFileInfo>
-#include <QtGui/QStandardItemModel>
-#include <QtGui/QStandardItem>
 
 namespace smulti {
 
-/* -----------------------------------------------------------------------
- * Static server URL templates
- * ----------------------------------------------------------------------- */
 const std::vector<EndpointDialog::ServerTemplate> EndpointDialog::s_templates = {
-	{ QStringLiteral("Custom RTMP"),           QStringLiteral("") },
-	{ QStringLiteral("Twitch"),                QStringLiteral("rtmp://live.twitch.tv/app") },
-	{ QStringLiteral("YouTube"),               QStringLiteral("rtmp://a.rtmp.youtube.com/live2") },
-	{ QStringLiteral("Facebook"),              QStringLiteral("rtmps://rtmp-api.facebook.com:443/rtmp/") },
-	{ QStringLiteral("TikTok"),                QStringLiteral("rtmp://push-rtmp.tiktokcdn.com/live") },
-	{ QStringLiteral("Kick"),                  QStringLiteral("rtmp://ingest.global-contribute.live-video.net/app") },
-	{ QStringLiteral("Trovo"),                 QStringLiteral("rtmp://livepush.trovo.live/push") },
+	{ QStringLiteral("Custom RTMP"), QStringLiteral("") },
+	{ QStringLiteral("Twitch"),      QStringLiteral("rtmp://live.twitch.tv/app") },
+	{ QStringLiteral("YouTube"),     QStringLiteral("rtmp://a.rtmp.youtube.com/live2") },
+	{ QStringLiteral("Facebook"),    QStringLiteral("rtmps://rtmp-api.facebook.com:443/rtmp/") },
+	{ QStringLiteral("TikTok"),      QStringLiteral("rtmp://push-rtmp.tiktokcdn.com/live") },
+	{ QStringLiteral("Kick"),        QStringLiteral("rtmp://ingest.global-contribute.live-video.net/app") },
+	{ QStringLiteral("Trovo"),       QStringLiteral("rtmp://livepush.trovo.live/push") },
 };
 
-/* -----------------------------------------------------------------------
- * Constructor
- * ----------------------------------------------------------------------- */
-EndpointDialog::EndpointDialog(const Endpoint   &ep,
+EndpointDialog::EndpointDialog(const Endpoint &ep,
                                EndpointRegistry &registry,
-                               QWidget          *parent)
-	: QDialog(parent)
-	, m_endpoint(ep)
-	, m_result(ep)
-	, m_registry(registry)
+                               QWidget *parent)
+	: QDialog(parent), m_endpoint(ep), m_result(ep), m_registry(registry)
 {
 	setWindowTitle(tr("Endpoint Settings"));
 	setModal(true);
-	setMinimumWidth(480);
-
-	m_available_backends = EncoderFactory::available_backends();
-
+	setMinimumWidth(620);
 	setup_ui();
 	populate_from_endpoint();
 }
 
-/* -----------------------------------------------------------------------
- * setup_ui
- * ----------------------------------------------------------------------- */
 void EndpointDialog::setup_ui()
 {
 	auto *outer = new QVBoxLayout(this);
-	outer->setSpacing(8);
 	outer->setContentsMargins(12, 12, 12, 12);
+	outer->setSpacing(10);
 
-	auto *form = new QFormLayout();
-	form->setRowWrapPolicy(QFormLayout::WrapLongRows);
-	form->setHorizontalSpacing(12);
-	form->setVerticalSpacing(6);
+	/* ---------------- Connection ---------------- */
+	auto *connection_group = new QGroupBox(tr("Connection"), this);
+	auto *connection_form = new QFormLayout(connection_group);
+	connection_form->setHorizontalSpacing(12);
+	connection_form->setVerticalSpacing(7);
 
-	/* Name */
 	m_name_edit = new QLineEdit(this);
-	m_name_edit->setPlaceholderText(tr("e.g. Twitch Main"));
-	form->addRow(tr("Name:"), m_name_edit);
+	m_name_edit->setPlaceholderText(tr("e.g. Facebook, Instagram, TikTok"));
+	connection_form->addRow(tr("Name:"), m_name_edit);
 
-	/* Server template dropdown */
 	m_template_cb = new QComboBox(this);
 	for (const auto &tmpl : s_templates)
 		m_template_cb->addItem(tmpl.label);
-	form->addRow(tr("Template:"), m_template_cb);
+	connection_form->addRow(tr("Platform template:"), m_template_cb);
 
-	/* Server URL */
 	m_server_edit = new QLineEdit(this);
 	m_server_edit->setPlaceholderText(tr("rtmp://... or rtmps://..."));
-	form->addRow(tr("Server URL:"), m_server_edit);
+	connection_form->addRow(tr("Server URL:"), m_server_edit);
 
-	/* Stream Key */
 	auto *key_row = new QHBoxLayout();
 	m_key_edit = new QLineEdit(this);
 	m_key_edit->setEchoMode(QLineEdit::Password);
-	m_key_edit->setPlaceholderText(tr("Stream key (stored plain)"));
+	m_key_edit->setPlaceholderText(tr("Stream key"));
 	m_show_key_btn = new QPushButton(tr("Show"), this);
 	m_show_key_btn->setCheckable(true);
-	m_show_key_btn->setFixedWidth(48);
-	key_row->addWidget(m_key_edit);
+	m_show_key_btn->setMinimumWidth(64);
+	key_row->addWidget(m_key_edit, 1);
 	key_row->addWidget(m_show_key_btn);
-	form->addRow(tr("Stream Key:"), key_row);
+	connection_form->addRow(tr("Stream key:"), key_row);
 
-	/* Encoder Backend */
+	auto *import_row = new QHBoxLayout();
+	m_import_btn = new QPushButton(tr("Import connection from OBS"), this);
+	m_import_btn->setToolTip(
+		tr("Copies the active OBS profile's server URL and stream key into this endpoint."));
+	m_tiktok_bridge_btn = new QPushButton(tr("Import TikTok Bridge"), this);
+	import_row->addWidget(m_import_btn);
+	import_row->addWidget(m_tiktok_bridge_btn);
+	import_row->addStretch();
+	connection_form->addRow(QString(), import_row);
+	outer->addWidget(connection_group);
+
+	/* ---------------- Video ---------------- */
+	auto *video_group = new QGroupBox(tr("Video"), this);
+	auto *video_form = new QFormLayout(video_group);
+	video_form->setHorizontalSpacing(12);
+	video_form->setVerticalSpacing(7);
+
+	m_video_mode_cb = new QComboBox(this);
+	m_video_mode_cb->addItem(tr("Use OBS streaming encoder settings"),
+	                         static_cast<int>(EncoderSettingsMode::UseOBS));
+	m_video_mode_cb->addItem(tr("Custom settings"),
+	                         static_cast<int>(EncoderSettingsMode::Custom));
+	video_form->addRow(tr("Settings:"), m_video_mode_cb);
+
+	m_codec_cb = new QComboBox(this);
+	m_codec_cb->addItem(tr("H.264 / AVC"), static_cast<int>(VideoCodec::H264));
+	m_codec_cb->addItem(tr("H.265 / HEVC"), static_cast<int>(VideoCodec::HEVC));
+	video_form->addRow(tr("Codec:"), m_codec_cb);
+
 	m_backend_cb = new QComboBox(this);
-	for (auto backend : m_available_backends)
-		m_backend_cb->addItem(
-			QString::fromStdString(EncoderFactory::backend_label(backend)),
-			static_cast<int>(backend)
-		);
-	form->addRow(tr("Encoder:"), m_backend_cb);
+	video_form->addRow(tr("Encoder:"), m_backend_cb);
 
-	/* Video Bitrate */
 	m_bitrate_spin = new QSpinBox(this);
-	m_bitrate_spin->setRange(500, 25000);
+	m_bitrate_spin->setRange(500, 50000);
 	m_bitrate_spin->setSingleStep(500);
 	m_bitrate_spin->setSuffix(tr(" kbps"));
-	form->addRow(tr("Video Bitrate:"), m_bitrate_spin);
+	video_form->addRow(tr("Video bitrate:"), m_bitrate_spin);
 
-	/* Keyframe Interval */
 	m_keyint_spin = new QSpinBox(this);
 	m_keyint_spin->setRange(1, 10);
 	m_keyint_spin->setSuffix(tr(" s"));
-	form->addRow(tr("Keyframe Interval:"), m_keyint_spin);
+	video_form->addRow(tr("Keyframe interval:"), m_keyint_spin);
 
-	/* Audio Bitrate */
-	m_audio_cb = new QComboBox(this);
-	const int audio_rates[] = {64, 96, 128, 160, 192, 320};
-	for (int rate : audio_rates)
-		m_audio_cb->addItem(QString("%1 kbps").arg(rate), rate);
-	form->addRow(tr("Audio Bitrate:"), m_audio_cb);
-
-	/* Output Orientation (v1.0.5) */
 	m_orientation_cb = new QComboBox(this);
-	m_orientation_cb->addItem(tr("Source (match OBS canvas)"),
-	                          static_cast<int>(OutputOrientation::SourceMatch));
-	m_orientation_cb->addItem(tr("Vertical 1080×1920 — Letterbox (TikTok / Shorts / Reels)"),
-	                          static_cast<int>(OutputOrientation::Vertical1080x1920Letterbox));
-	/* Center-crop reserved for v1.1 — listed disabled-style as a hint */
-	m_orientation_cb->addItem(tr("Vertical 1080×1920 — Center-Crop  (v1.1, not yet available)"),
-	                          static_cast<int>(OutputOrientation::Vertical1080x1920CenterCrop));
-	/* Disable the v1.1 entry */
-	auto *model = qobject_cast<QStandardItemModel *>(m_orientation_cb->model());
-	if (model && model->item(2)) {
-		model->item(2)->setFlags(model->item(2)->flags() & ~Qt::ItemIsEnabled);
-	}
-	form->addRow(tr("Output Orientation:"), m_orientation_cb);
+	m_orientation_cb->addItem(
+		tr("Source / match OBS canvas"),
+		static_cast<int>(OutputOrientation::SourceMatch));
+	m_orientation_cb->addItem(
+		tr("Vertical 1080×1920 — Stretch to full screen"),
+		static_cast<int>(OutputOrientation::Vertical1080x1920Stretch));
+	m_orientation_cb->addItem(
+		tr("Vertical 1080×1920 — Rotate landscape 90° (turn phone sideways)"),
+		static_cast<int>(OutputOrientation::Vertical1080x1920Rotated));
+	video_form->addRow(tr("Canvas mode:"), m_orientation_cb);
 
-	/* Linked to main stream */
-	m_linked_cb = new QCheckBox(tr("Start/stop with OBS main stream"), this);
-	form->addRow(QString(), m_linked_cb);
+	m_video_hint = new QLabel(this);
+	m_video_hint->setWordWrap(true);
+	m_video_hint->setStyleSheet("color: palette(mid);");
+	video_form->addRow(QString(), m_video_hint);
+	outer->addWidget(video_group);
 
-	outer->addLayout(form);
+	/* ---------------- Audio ---------------- */
+	auto *audio_group = new QGroupBox(tr("Audio"), this);
+	auto *audio_form = new QFormLayout(audio_group);
+	audio_form->setHorizontalSpacing(12);
+	audio_form->setVerticalSpacing(7);
 
-	/* Status label (for test connection result) */
+	m_audio_mode_cb = new QComboBox(this);
+	m_audio_mode_cb->addItem(tr("Use OBS streaming audio settings"),
+	                         static_cast<int>(EncoderSettingsMode::UseOBS));
+	m_audio_mode_cb->addItem(tr("Custom AAC"),
+	                         static_cast<int>(EncoderSettingsMode::Custom));
+	audio_form->addRow(tr("Settings:"), m_audio_mode_cb);
+
+	m_audio_cb = new QComboBox(this);
+	for (int rate : {64, 96, 128, 160, 192, 256, 320})
+		m_audio_cb->addItem(QString("%1 kbps").arg(rate), rate);
+	audio_form->addRow(tr("Audio bitrate:"), m_audio_cb);
+	outer->addWidget(audio_group);
+
+	/* ---------------- Behaviour ---------------- */
+	auto *behavior_group = new QGroupBox(tr("Start / Stop"), this);
+	auto *behavior_layout = new QVBoxLayout(behavior_group);
+	m_linked_cb = new QCheckBox(tr("Start and stop automatically with OBS main stream"), this);
+	auto *manual_hint = new QLabel(
+		tr("When automatic start is disabled, a Start/Stop button appears on the endpoint card."),
+		this);
+	manual_hint->setWordWrap(true);
+	manual_hint->setStyleSheet("color: palette(mid);");
+	behavior_layout->addWidget(m_linked_cb);
+	behavior_layout->addWidget(manual_hint);
+	outer->addWidget(behavior_group);
+
 	m_status_label = new QLabel(this);
 	m_status_label->setVisible(false);
 	m_status_label->setWordWrap(true);
 	outer->addWidget(m_status_label);
 
-	/* Import buttons */
-	auto *import_row = new QHBoxLayout();
-	m_import_btn = new QPushButton(tr("Import from OBS"), this);
-	m_import_btn->setToolTip(tr("Read server URL and stream key from the active "
-	                            "OBS profile (whatever you've connected via OBS's "
-	                            "native 'Connect Account' for Twitch/YouTube/etc.)"));
-	m_tiktok_bridge_btn = new QPushButton(tr("Import TikTok Bridge"), this);
-	m_tiktok_bridge_btn->setToolTip(tr("Read locally supplied TikTok RTMP data from "
-	                                   "a Bridge JSON file. StreamMulticast does not "
-	                                   "generate keys or perform TikTok login."));
-	import_row->addWidget(m_import_btn);
-	import_row->addWidget(m_tiktok_bridge_btn);
-	import_row->addStretch();
-	outer->addLayout(import_row);
-
-	/* Dialog buttons */
 	auto *btn_row = new QHBoxLayout();
-	m_test_btn   = new QPushButton(tr("Test Connection"), this);
-	m_save_btn   = new QPushButton(tr("Save"), this);
+	m_test_btn = new QPushButton(tr("Test Connection"), this);
+	m_save_btn = new QPushButton(tr("Save"), this);
 	m_cancel_btn = new QPushButton(tr("Cancel"), this);
 	m_save_btn->setDefault(true);
-
 	btn_row->addWidget(m_test_btn);
 	btn_row->addStretch();
 	btn_row->addWidget(m_save_btn);
 	btn_row->addWidget(m_cancel_btn);
 	outer->addLayout(btn_row);
 
-	setLayout(outer);
-
-	/* Connections */
 	connect(m_template_cb, QOverload<int>::of(&QComboBox::currentIndexChanged),
 	        this, &EndpointDialog::on_template_selected);
 	connect(m_show_key_btn, &QPushButton::toggled,
 	        this, &EndpointDialog::on_show_key_toggled);
-	connect(m_import_btn, &QPushButton::clicked, this, &EndpointDialog::on_import_from_obs);
-	connect(m_tiktok_bridge_btn, &QPushButton::clicked, this, &EndpointDialog::on_import_tiktok_bridge);
-	connect(m_test_btn,   &QPushButton::clicked, this, &EndpointDialog::on_test_connection);
-	connect(m_save_btn,   &QPushButton::clicked, this, &EndpointDialog::on_save);
-	connect(m_cancel_btn, &QPushButton::clicked, this, &QDialog::reject);
+	connect(m_import_btn, &QPushButton::clicked,
+	        this, &EndpointDialog::on_import_from_obs);
+	connect(m_tiktok_bridge_btn, &QPushButton::clicked,
+	        this, &EndpointDialog::on_import_tiktok_bridge);
+	connect(m_video_mode_cb, QOverload<int>::of(&QComboBox::currentIndexChanged),
+	        this, &EndpointDialog::on_video_mode_changed);
+	connect(m_audio_mode_cb, QOverload<int>::of(&QComboBox::currentIndexChanged),
+	        this, &EndpointDialog::on_audio_mode_changed);
+	connect(m_codec_cb, QOverload<int>::of(&QComboBox::currentIndexChanged),
+	        this, &EndpointDialog::on_codec_changed);
+	connect(m_test_btn, &QPushButton::clicked,
+	        this, &EndpointDialog::on_test_connection);
+	connect(m_save_btn, &QPushButton::clicked,
+	        this, &EndpointDialog::on_save);
+	connect(m_cancel_btn, &QPushButton::clicked,
+	        this, &QDialog::reject);
 }
 
-/* -----------------------------------------------------------------------
- * populate_from_endpoint — fill form widgets from m_endpoint
- * ----------------------------------------------------------------------- */
 void EndpointDialog::populate_from_endpoint()
 {
 	m_name_edit->setText(QString::fromStdString(m_endpoint.name));
@@ -210,33 +217,30 @@ void EndpointDialog::populate_from_endpoint()
 	m_keyint_spin->setValue(m_endpoint.keyframe_interval_sec);
 	m_linked_cb->setChecked(m_endpoint.linked_to_main);
 
-	/* Backend combo */
-	for (int i = 0; i < m_backend_cb->count(); ++i) {
-		if (m_backend_cb->itemData(i).toInt() == static_cast<int>(m_endpoint.encoder_backend)) {
-			m_backend_cb->setCurrentIndex(i);
-			break;
+	auto set_data = [](QComboBox *box, int value) {
+		for (int i = 0; i < box->count(); ++i) {
+			if (box->itemData(i).toInt() == value) {
+				box->setCurrentIndex(i);
+				return;
+			}
 		}
-	}
+	};
 
-	/* Audio bitrate combo */
-	for (int i = 0; i < m_audio_cb->count(); ++i) {
-		if (m_audio_cb->itemData(i).toInt() == m_endpoint.audio_bitrate_kbps) {
-			m_audio_cb->setCurrentIndex(i);
-			break;
-		}
-	}
+	m_video_mode_cb->blockSignals(true);
+	set_data(m_video_mode_cb, static_cast<int>(m_endpoint.video_settings_mode));
+	m_video_mode_cb->blockSignals(false);
 
-	/* Orientation combo */
-	for (int i = 0; i < m_orientation_cb->count(); ++i) {
-		if (m_orientation_cb->itemData(i).toInt() == static_cast<int>(m_endpoint.orientation)) {
-			m_orientation_cb->setCurrentIndex(i);
-			break;
-		}
-	}
+	m_codec_cb->blockSignals(true);
+	set_data(m_codec_cb, static_cast<int>(m_endpoint.video_codec));
+	m_codec_cb->blockSignals(false);
+	refresh_backend_choices(m_endpoint.encoder_backend);
 
-	/* Try to match server URL to a template */
+	set_data(m_audio_mode_cb, static_cast<int>(m_endpoint.audio_settings_mode));
+	set_data(m_audio_cb, m_endpoint.audio_bitrate_kbps);
+	set_data(m_orientation_cb, static_cast<int>(m_endpoint.orientation));
+
 	m_template_cb->blockSignals(true);
-	m_template_cb->setCurrentIndex(0); // "Custom RTMP"
+	m_template_cb->setCurrentIndex(0);
 	for (int i = 1; i < static_cast<int>(s_templates.size()); ++i) {
 		if (m_server_edit->text().startsWith(s_templates[i].url)) {
 			m_template_cb->setCurrentIndex(i);
@@ -244,39 +248,92 @@ void EndpointDialog::populate_from_endpoint()
 		}
 	}
 	m_template_cb->blockSignals(false);
+
+	refresh_mode_controls();
 }
 
-/* -----------------------------------------------------------------------
- * collect_from_form — read form widgets into an Endpoint
- * ----------------------------------------------------------------------- */
+void EndpointDialog::refresh_backend_choices(EncoderBackend preferred)
+{
+	VideoCodec codec = static_cast<VideoCodec>(m_codec_cb->currentData().toInt());
+	auto backends = EncoderFactory::available_backends(codec);
+
+	m_backend_cb->blockSignals(true);
+	m_backend_cb->clear();
+	int selected = -1;
+	for (auto backend : backends) {
+		int row = m_backend_cb->count();
+		m_backend_cb->addItem(
+			QString::fromStdString(EncoderFactory::backend_label(backend)),
+			static_cast<int>(backend));
+		if (backend == preferred)
+			selected = row;
+	}
+	if (selected >= 0)
+		m_backend_cb->setCurrentIndex(selected);
+	else if (m_backend_cb->count() > 0)
+		m_backend_cb->setCurrentIndex(0);
+	m_backend_cb->blockSignals(false);
+}
+
+void EndpointDialog::refresh_mode_controls()
+{
+	auto video_mode = static_cast<EncoderSettingsMode>(m_video_mode_cb->currentData().toInt());
+	auto audio_mode = static_cast<EncoderSettingsMode>(m_audio_mode_cb->currentData().toInt());
+	auto codec = static_cast<VideoCodec>(m_codec_cb->currentData().toInt());
+
+	bool custom_video = video_mode == EncoderSettingsMode::Custom;
+	m_codec_cb->setEnabled(custom_video);
+	m_backend_cb->setEnabled(custom_video);
+	m_bitrate_spin->setEnabled(custom_video);
+	m_keyint_spin->setEnabled(custom_video);
+
+	m_audio_cb->setEnabled(audio_mode == EncoderSettingsMode::Custom);
+
+	if (!custom_video) {
+		m_video_hint->setText(
+			tr("The endpoint clones the video encoder and settings currently configured in OBS. "
+			   "Canvas mode remains independent, so vertical output still works."));
+	} else if (codec == VideoCodec::HEVC) {
+		m_video_hint->setText(
+			tr("HEVC/H.265 uses an available hardware encoder. The destination must support "
+			   "HEVC over RTMP/Enhanced RTMP; H.264 remains the safest choice for Meta platforms."));
+	} else {
+		m_video_hint->setText(
+			tr("Custom H.264 uses the selected encoder, bitrate and keyframe interval."));
+	}
+}
+
 Endpoint EndpointDialog::collect_from_form() const
 {
-	Endpoint ep = m_endpoint; // preserve id and sort_order
+	Endpoint ep = m_endpoint;
+	ep.name = m_name_edit->text().trimmed().toStdString();
+	ep.server_url = m_server_edit->text().trimmed().toStdString();
+	ep.stream_key = m_key_edit->text().trimmed().toStdString();
 
-	ep.name                 = m_name_edit->text().toStdString();
-	ep.server_url           = m_server_edit->text().toStdString();
-	ep.stream_key           = m_key_edit->text().toStdString();
-	ep.video_bitrate_kbps   = m_bitrate_spin->value();
+	ep.video_settings_mode = static_cast<EncoderSettingsMode>(
+		m_video_mode_cb->currentData().toInt());
+	ep.video_codec = static_cast<VideoCodec>(m_codec_cb->currentData().toInt());
+	if (m_backend_cb->currentIndex() >= 0)
+		ep.encoder_backend = static_cast<EncoderBackend>(m_backend_cb->currentData().toInt());
+	ep.video_bitrate_kbps = m_bitrate_spin->value();
 	ep.keyframe_interval_sec = m_keyint_spin->value();
-	ep.audio_bitrate_kbps   = m_audio_cb->currentData().toInt();
-	ep.orientation          = static_cast<OutputOrientation>(
-	                              m_orientation_cb->currentData().toInt());
-	ep.linked_to_main       = m_linked_cb->isChecked();
-	ep.encoder_backend      = static_cast<EncoderBackend>(
-	                              m_backend_cb->currentData().toInt());
+
+	ep.audio_settings_mode = static_cast<EncoderSettingsMode>(
+		m_audio_mode_cb->currentData().toInt());
+	ep.audio_bitrate_kbps = m_audio_cb->currentData().toInt();
+
+	ep.orientation = static_cast<OutputOrientation>(
+		m_orientation_cb->currentData().toInt());
+	ep.linked_to_main = m_linked_cb->isChecked();
 	return ep;
 }
 
-/* -----------------------------------------------------------------------
- * Slot handlers
- * ----------------------------------------------------------------------- */
 void EndpointDialog::on_template_selected(int index)
 {
 	if (index < 0 || index >= static_cast<int>(s_templates.size()))
 		return;
-	const QString &url = s_templates[index].url;
-	if (!url.isEmpty())
-		m_server_edit->setText(url);
+	if (!s_templates[index].url.isEmpty())
+		m_server_edit->setText(s_templates[index].url);
 }
 
 void EndpointDialog::on_show_key_toggled(bool visible)
@@ -285,34 +342,46 @@ void EndpointDialog::on_show_key_toggled(bool visible)
 	m_show_key_btn->setText(visible ? tr("Hide") : tr("Show"));
 }
 
+void EndpointDialog::on_video_mode_changed(int)
+{
+	refresh_mode_controls();
+}
+
+void EndpointDialog::on_audio_mode_changed(int)
+{
+	refresh_mode_controls();
+}
+
+void EndpointDialog::on_codec_changed(int)
+{
+	EncoderBackend preferred = m_endpoint.encoder_backend;
+	if (m_backend_cb->currentIndex() >= 0)
+		preferred = static_cast<EncoderBackend>(m_backend_cb->currentData().toInt());
+	refresh_backend_choices(preferred);
+	refresh_mode_controls();
+}
+
 void EndpointDialog::on_import_from_obs()
 {
-	/* v1.0.6 — read active OBS profile's stream config and fill the form.
-	 * Avoids the OAuth maintenance tax by piggybacking on OBS's native
-	 * "Connect Account" flow which already populated the profile config. */
 	ObsServiceConfig cfg = import_from_active_obs_profile();
 	if (!cfg.ok) {
-		QMessageBox::warning(this, tr("Import from OBS"),
-		    tr("Could not import from active OBS profile:\n\n%1\n\n"
-		       "Tip: open OBS → Settings → Stream, connect your account, "
-		       "and try again.")
-		    .arg(QString::fromStdString(cfg.error_message)));
+		QMessageBox::warning(
+			this, tr("Import from OBS"),
+			tr("Could not import from active OBS profile:\n\n%1")
+				.arg(QString::fromStdString(cfg.error_message)));
 		return;
 	}
 
 	m_server_edit->setText(QString::fromStdString(cfg.server_url));
 	m_key_edit->setText(QString::fromStdString(cfg.stream_key));
 
-	/* If the Name field is empty/default, auto-fill from service name */
 	if (m_name_edit->text().trimmed().isEmpty() ||
 	    m_name_edit->text() == tr("New Endpoint")) {
 		QString svc = QString::fromStdString(cfg.service_name);
-		if (!svc.isEmpty()) {
+		if (!svc.isEmpty())
 			m_name_edit->setText(svc + tr(" (imported)"));
-		}
 	}
 
-	/* Update template dropdown if server matches a known template */
 	for (int i = 1; i < static_cast<int>(s_templates.size()); ++i) {
 		if (QString::fromStdString(cfg.server_url).startsWith(s_templates[i].url)) {
 			m_template_cb->blockSignals(true);
@@ -323,34 +392,29 @@ void EndpointDialog::on_import_from_obs()
 	}
 
 	m_status_label->setText(
-	    tr("✓ Imported %1 from active OBS profile.")
-	    .arg(QString::fromStdString(cfg.service_name)));
+		tr("✓ Connection imported from OBS: %1")
+			.arg(QString::fromStdString(cfg.service_name)));
 	m_status_label->setStyleSheet("color: #2ecc71;");
 	m_status_label->setVisible(true);
 }
 
 void EndpointDialog::on_import_tiktok_bridge()
 {
-	std::string default_path = default_tiktok_bridge_path();
-	QString path = QString::fromStdString(default_path);
-
+	QString path = QString::fromStdString(default_tiktok_bridge_path());
 	if (path.isEmpty() || !QFileInfo::exists(path)) {
 		path = QFileDialog::getOpenFileName(
-			this,
-			tr("Import TikTok Bridge JSON"),
-			path,
-			tr("JSON files (*.json);;All files (*)")
-		);
+			this, tr("Import TikTok Bridge JSON"), path,
+			tr("JSON files (*.json);;All files (*)"));
 		if (path.isEmpty())
 			return;
 	}
 
 	TikTokBridgeConfig cfg = import_tiktok_bridge_file(path.toStdString());
 	if (!cfg.ok) {
-		QMessageBox::warning(this, tr("Import TikTok Bridge"),
-		    tr("Could not import TikTok Bridge data:\n\n%1\n\n"
-		       "Expected JSON fields: server_url/server and stream_key/key.")
-		    .arg(QString::fromStdString(cfg.error_message)));
+		QMessageBox::warning(
+			this, tr("Import TikTok Bridge"),
+			tr("Could not import TikTok Bridge data:\n\n%1")
+				.arg(QString::fromStdString(cfg.error_message)));
 		return;
 	}
 
@@ -363,62 +427,41 @@ void EndpointDialog::on_import_tiktok_bridge()
 		m_name_edit->setText(bridge_name.isEmpty() ? tr("TikTok Bridge") : bridge_name);
 	}
 
-	/* Update template dropdown if server matches a known template */
-	for (int i = 1; i < static_cast<int>(s_templates.size()); ++i) {
-		if (QString::fromStdString(cfg.server_url).startsWith(s_templates[i].url)) {
-			m_template_cb->blockSignals(true);
-			m_template_cb->setCurrentIndex(i);
-			m_template_cb->blockSignals(false);
-			break;
-		}
-	}
-
-	for (int i = 0; i < m_orientation_cb->count(); ++i) {
+	/* Safe TikTok defaults: custom H.264 + portrait stretch. */
+	for (int i = 0; i < m_video_mode_cb->count(); ++i)
+		if (m_video_mode_cb->itemData(i).toInt() == static_cast<int>(EncoderSettingsMode::Custom))
+			m_video_mode_cb->setCurrentIndex(i);
+	for (int i = 0; i < m_codec_cb->count(); ++i)
+		if (m_codec_cb->itemData(i).toInt() == static_cast<int>(VideoCodec::H264))
+			m_codec_cb->setCurrentIndex(i);
+	for (int i = 0; i < m_orientation_cb->count(); ++i)
 		if (m_orientation_cb->itemData(i).toInt() ==
-		    static_cast<int>(OutputOrientation::Vertical1080x1920Letterbox)) {
+		    static_cast<int>(OutputOrientation::Vertical1080x1920Stretch))
 			m_orientation_cb->setCurrentIndex(i);
-			break;
-		}
-	}
 
 	m_bitrate_spin->setValue(2500);
-	for (int i = 0; i < m_audio_cb->count(); ++i) {
-		if (m_audio_cb->itemData(i).toInt() == 128) {
+	for (int i = 0; i < m_audio_cb->count(); ++i)
+		if (m_audio_cb->itemData(i).toInt() == 128)
 			m_audio_cb->setCurrentIndex(i);
-			break;
-		}
-	}
 
-	QString status = tr("Imported TikTok Bridge data from %1.")
-		.arg(QFileInfo(path).fileName());
-	if (!cfg.expires_at.empty()) {
-		status += tr(" Expires: %1.")
-			.arg(QString::fromStdString(cfg.expires_at));
-	}
-
-	m_status_label->setText(status);
+	m_status_label->setText(
+		tr("✓ TikTok Bridge imported from %1").arg(QFileInfo(path).fileName()));
 	m_status_label->setStyleSheet("color: #2ecc71;");
 	m_status_label->setVisible(true);
 }
 
 void EndpointDialog::on_test_connection()
 {
-	/* v1.0 stub: full RTMP handshake probe is planned for v1.1.
-	 * TODO(v1.1): Implement 3-second RTMP handshake probe without streaming.
-	 * Use obs_output_t "rtmp_output" with a custom signal handler, or
-	 * a separate librtmp call.  Hard-stop after 3s regardless of result. */
 	m_status_label->setText(
-		tr("Test Connection is planned for v1.1.  "
-		   "To verify your stream key, try starting the endpoint "
-		   "and checking the Health tab.")
-	);
+		tr("Use the manual Start button (with automatic start disabled) to perform a real "
+		   "endpoint test. The Health tab shows the actual RTMP result."));
 	m_status_label->setVisible(true);
 }
 
 void EndpointDialog::on_save()
 {
 	if (m_name_edit->text().trimmed().isEmpty()) {
-		QMessageBox::warning(this, tr("Validation"), tr("Please enter a name for this endpoint."));
+		QMessageBox::warning(this, tr("Validation"), tr("Please enter an endpoint name."));
 		return;
 	}
 	if (m_server_edit->text().trimmed().isEmpty()) {
@@ -427,6 +470,14 @@ void EndpointDialog::on_save()
 	}
 	if (m_key_edit->text().trimmed().isEmpty()) {
 		QMessageBox::warning(this, tr("Validation"), tr("Please enter a stream key."));
+		return;
+	}
+
+	auto video_mode = static_cast<EncoderSettingsMode>(m_video_mode_cb->currentData().toInt());
+	if (video_mode == EncoderSettingsMode::Custom && m_backend_cb->currentIndex() < 0) {
+		QMessageBox::warning(
+			this, tr("Validation"),
+			tr("No encoder is available for the selected codec on this computer."));
 		return;
 	}
 
