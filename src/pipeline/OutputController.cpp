@@ -191,8 +191,12 @@ void OutputController::do_create_output()
 		return;
 	}
 
+	/* obs_output_set_service() does NOT addref the service in libobs.
+	 * Keep our creation reference alive for the entire output lifetime and
+	 * release it only after obs_output_release() has destroyed/detached the
+	 * output. Releasing here left output->service dangling and made
+	 * obs_output_start() fail immediately with no last_error. */
 	obs_output_set_service(new_output, service);
-	obs_service_release(service); // output addref's the service
 
 	/* Register start/stop signal handlers */
 	signal_handler_t *sh = obs_output_get_signal_handler(new_output);
@@ -380,6 +384,7 @@ void OutputController::stop()
 	}
 
 	obs_output_t  *output_to_release;
+	obs_service_t *service_to_release;
 	obs_encoder_t *video_to_release;
 	obs_encoder_t *audio_to_release;
 	std::thread    reconnect_to_join;
@@ -399,9 +404,10 @@ void OutputController::stop()
 		 * From the caller's point of view the controller is Idle again
 		 * immediately — the actual (potentially blocking) teardown happens
 		 * on the reaper thread below. */
-		output_to_release = m_output;
-		video_to_release  = m_video_enc;
-		audio_to_release  = m_audio_enc;
+		output_to_release  = m_output;
+		service_to_release = output_to_release ? obs_output_get_service(output_to_release) : nullptr;
+		video_to_release   = m_video_enc;
+		audio_to_release   = m_audio_enc;
 		reconnect_to_join = std::move(m_reconnect_thread);
 
 		m_output          = nullptr;
@@ -425,7 +431,7 @@ void OutputController::stop()
 	 * this). */
 	auto self               = shared_from_this();
 	auto reconnect_to_join_p = std::make_shared<std::thread>(std::move(reconnect_to_join));
-	m_reaper.enqueue([self, output_to_release, video_to_release, audio_to_release,
+	m_reaper.enqueue([self, output_to_release, service_to_release, video_to_release, audio_to_release,
 	                  reconnect = std::move(reconnect_to_join_p)]() {
 		if (reconnect->joinable())
 			reconnect->join();
@@ -447,6 +453,12 @@ void OutputController::stop()
 
 		if (output_to_release)
 			obs_output_release(output_to_release);
+
+		/* The output does not own a ref to the service. Release our creation
+		 * ref only after the output is destroyed, because obs_output_destroy()
+		 * still touches service->output. */
+		if (service_to_release)
+			obs_service_release(service_to_release);
 	});
 }
 
@@ -495,14 +507,16 @@ void OutputController::shutdown_blocking()
 	 * From here on reconnect_thread_func()'s identity guard sees m_output ==
 	 * nullptr and bails before touching the captured output. */
 	obs_output_t  *output_to_release;
+	obs_service_t *service_to_release;
 	obs_encoder_t *video_to_release;
 	obs_encoder_t *audio_to_release;
 	std::thread    reconnect_to_join;
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-		output_to_release = m_output;
-		video_to_release  = m_video_enc;
-		audio_to_release  = m_audio_enc;
+		output_to_release  = m_output;
+		service_to_release = output_to_release ? obs_output_get_service(output_to_release) : nullptr;
+		video_to_release   = m_video_enc;
+		audio_to_release   = m_audio_enc;
 		reconnect_to_join = std::move(m_reconnect_thread);
 
 		/* Null m_output BEFORE the (potentially long) blocking release call
@@ -547,6 +561,9 @@ void OutputController::shutdown_blocking()
 		 * exists. */
 		obs_output_release(output_to_release);
 	}
+
+	if (service_to_release)
+		obs_service_release(service_to_release);
 }
 
 /* -----------------------------------------------------------------------
