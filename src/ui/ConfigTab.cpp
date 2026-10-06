@@ -7,73 +7,59 @@ GPLv2 — see LICENSE for full text.
 
 #include "ConfigTab.hpp"
 #include "EndpointDialog.hpp"
-#include "../plugin-support.h"
 #include "../pipeline/OutputController.hpp"
 
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QHBoxLayout>
-#include <QtWidgets/QLabel>
-#include <QtWidgets/QCheckBox>
-#include <QtWidgets/QPushButton>
-#include <QtWidgets/QListWidget>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QListWidgetItem>
 #include <QtCore/QMetaObject>
-#include <QtWidgets/QMessageBox>
 
 namespace smulti {
 
-/* -----------------------------------------------------------------------
- * EndpointCard
- * ----------------------------------------------------------------------- */
 EndpointCard::EndpointCard(const Endpoint &ep, QWidget *parent)
-	: QWidget(parent)
-	, m_id(ep.id)
-	, m_ep(ep)
+	: QWidget(parent), m_id(ep.id), m_ep(ep)
 {
 	setup_ui();
+	update_state(ep);
+	update_runtime(OutputState::Idle, {});
 }
 
 void EndpointCard::setup_ui()
 {
 	auto *layout = new QHBoxLayout(this);
 	layout->setContentsMargins(8, 6, 8, 6);
-	layout->setSpacing(10);
+	layout->setSpacing(8);
 
-	/* Status LED (colour square) */
 	m_status_led = new QLabel(this);
 	m_status_led->setFixedSize(14, 14);
-	m_status_led->setStyleSheet("background: #95a5a6; border-radius: 7px;");
 	layout->addWidget(m_status_led);
 
-	/* Name */
-	m_name_label = new QLabel(QString::fromStdString(m_ep.name), this);
+	m_name_label = new QLabel(this);
 	m_name_label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-	layout->addWidget(m_name_label);
+	layout->addWidget(m_name_label, 1);
 
-	/* Enabled toggle */
 	m_enabled_cb = new QCheckBox(tr("On"), this);
-	m_enabled_cb->setChecked(m_ep.enabled);
 	layout->addWidget(m_enabled_cb);
 
-	/* Edit button — readable size, no longer cramped */
+	m_start_stop_btn = new QPushButton(tr("Start"), this);
+	m_start_stop_btn->setMinimumWidth(72);
+	m_start_stop_btn->setMinimumHeight(28);
+	m_start_stop_btn->setToolTip(tr("Start or stop this endpoint independently"));
+	layout->addWidget(m_start_stop_btn);
+
 	m_edit_btn = new QPushButton(tr("Edit"), this);
-	m_edit_btn->setMinimumWidth(80);
+	m_edit_btn->setMinimumWidth(72);
 	m_edit_btn->setMinimumHeight(28);
 	layout->addWidget(m_edit_btn);
 
-	/* Delete button — full word, not a single 'X' */
 	m_delete_btn = new QPushButton(tr("Delete"), this);
-	m_delete_btn->setMinimumWidth(80);
+	m_delete_btn->setMinimumWidth(72);
 	m_delete_btn->setMinimumHeight(28);
-	m_delete_btn->setToolTip(tr("Remove endpoint"));
 	layout->addWidget(m_delete_btn);
 
-	/* Minimum card height ensures buttons aren't clipped at the bottom */
 	setMinimumHeight(44);
 
-	setLayout(layout);
-
-	/* Connections */
 	connect(m_edit_btn, &QPushButton::clicked, this, [this]() {
 		emit editRequested(m_id);
 	});
@@ -83,39 +69,89 @@ void EndpointCard::setup_ui()
 	connect(m_delete_btn, &QPushButton::clicked, this, [this]() {
 		emit deleteRequested(m_id);
 	});
+	connect(m_start_stop_btn, &QPushButton::clicked, this, [this]() {
+		emit manualStartStopRequested(m_id);
+	});
 }
 
 void EndpointCard::update_state(const Endpoint &ep)
 {
 	m_ep = ep;
 	m_name_label->setText(QString::fromStdString(ep.name));
+
 	m_enabled_cb->blockSignals(true);
 	m_enabled_cb->setChecked(ep.enabled);
 	m_enabled_cb->blockSignals(false);
+
+	/* Manual control is intentionally exposed only when automatic linkage is
+	 * disabled. This keeps one obvious source of truth for start/stop. */
+	m_start_stop_btn->setVisible(!ep.linked_to_main);
+	m_start_stop_btn->setEnabled(ep.enabled);
+	m_start_stop_btn->setToolTip(
+		ep.linked_to_main
+			? tr("Automatic start/stop is enabled for this endpoint")
+			: tr("Start or stop this endpoint independently"));
 }
 
-/* -----------------------------------------------------------------------
- * ConfigTab
- * ----------------------------------------------------------------------- */
+void EndpointCard::update_runtime(OutputState state, const std::string &last_error)
+{
+	QString led = "background: #95a5a6; border-radius: 7px;";
+	QString text = tr("Start");
+	bool can_click = m_ep.enabled;
+
+	switch (state) {
+	case OutputState::Starting:
+		led = "background: #f1c40f; border-radius: 7px;";
+		text = tr("Stop");
+		break;
+	case OutputState::Live:
+		led = "background: #2ecc71; border-radius: 7px;";
+		text = tr("Stop");
+		break;
+	case OutputState::Reconnecting:
+		led = "background: #e67e22; border-radius: 7px;";
+		text = tr("Stop");
+		break;
+	case OutputState::FailedHard:
+		led = "background: #e74c3c; border-radius: 7px;";
+		text = tr("Start");
+		break;
+	case OutputState::Idle:
+	default:
+		break;
+	}
+
+	m_status_led->setStyleSheet(led);
+	m_start_stop_btn->setText(text);
+	m_start_stop_btn->setEnabled(can_click);
+
+	if (!last_error.empty()) {
+		QString error = QString::fromStdString(last_error);
+		m_status_led->setToolTip(error);
+		m_start_stop_btn->setToolTip(error);
+	} else {
+		m_status_led->setToolTip(QString());
+	}
+}
+
 ConfigTab::ConfigTab(EndpointRegistry &registry, QWidget *parent)
-	: QWidget(parent)
-	, m_registry(registry)
+	: QWidget(parent), m_registry(registry)
 {
 	setup_ui();
 
-	/* Register as observer for live updates from the registry.
-	 * Observer callbacks may come from non-Qt threads — use invokeMethod to
-	 * marshal onto the Qt thread. */
 	m_observer_token = m_registry.register_observer(
 		[this](ChangeKind kind, const Endpoint &ep) {
-			/* Post to Qt main thread */
 			QMetaObject::invokeMethod(
 				this,
 				[this, kind, ep]() { on_registry_changed(kind, ep); },
-				Qt::QueuedConnection
-			);
-		}
-	);
+				Qt::QueuedConnection);
+		});
+
+	m_runtime_timer = new QTimer(this);
+	m_runtime_timer->setInterval(350);
+	connect(m_runtime_timer, &QTimer::timeout, this, &ConfigTab::refresh_runtime_states);
+	m_runtime_timer->start();
+	refresh_runtime_states();
 }
 
 ConfigTab::~ConfigTab()
@@ -130,7 +166,6 @@ void ConfigTab::setup_ui()
 	outer_layout->setContentsMargins(4, 4, 4, 4);
 	outer_layout->setSpacing(4);
 
-	/* Endpoint list — drag-to-reorder enabled */
 	m_list = new QListWidget(this);
 	m_list->setDragDropMode(QAbstractItemView::InternalMove);
 	m_list->setDefaultDropAction(Qt::MoveAction);
@@ -138,19 +173,12 @@ void ConfigTab::setup_ui()
 	m_list->setSpacing(2);
 	outer_layout->addWidget(m_list, 1);
 
-	/* Add Endpoint button */
 	m_add_btn = new QPushButton(tr("+ Add Endpoint"), this);
 	outer_layout->addWidget(m_add_btn);
 
-	setLayout(outer_layout);
-
 	connect(m_add_btn, &QPushButton::clicked, this, &ConfigTab::on_add_endpoint);
-
-	// AVANATRO-VERIFY: QListWidget rowsMoved signal — fired after internal drag-to-reorder.
-	// In Qt6 this is QAbstractItemModel::rowsMoved — connect via model().
 	connect(m_list->model(), &QAbstractItemModel::rowsMoved, this, &ConfigTab::on_list_reorder);
 
-	/* Populate initial list */
 	rebuild_list();
 }
 
@@ -158,8 +186,7 @@ void ConfigTab::rebuild_list()
 {
 	m_list->clear();
 
-	auto endpoints = m_registry.all();
-	for (const auto &ep : endpoints) {
+	for (const auto &ep : m_registry.all()) {
 		auto *card = new EndpointCard(ep, nullptr);
 		auto *item = new QListWidgetItem(m_list);
 		item->setSizeHint(card->sizeHint());
@@ -167,23 +194,21 @@ void ConfigTab::rebuild_list()
 		m_list->addItem(item);
 		m_list->setItemWidget(item, card);
 
-		connect(card, &EndpointCard::editRequested,   this, &ConfigTab::on_edit_endpoint);
-		connect(card, &EndpointCard::enableToggled,   this, &ConfigTab::on_toggle_endpoint);
+		connect(card, &EndpointCard::editRequested, this, &ConfigTab::on_edit_endpoint);
+		connect(card, &EndpointCard::enableToggled, this, &ConfigTab::on_toggle_endpoint);
 		connect(card, &EndpointCard::deleteRequested, this, &ConfigTab::on_delete_endpoint);
+		connect(card, &EndpointCard::manualStartStopRequested,
+		        this, &ConfigTab::on_manual_start_stop);
 	}
+	refresh_runtime_states();
 }
 
-/* -----------------------------------------------------------------------
- * Slot handlers
- * ----------------------------------------------------------------------- */
 void ConfigTab::on_add_endpoint()
 {
 	Endpoint new_ep = Endpoint::make_default("New Endpoint");
-
 	EndpointDialog dlg(new_ep, m_registry, this);
-	if (dlg.exec() == QDialog::Accepted) {
+	if (dlg.exec() == QDialog::Accepted)
 		m_registry.add(dlg.result_endpoint());
-	}
 }
 
 void ConfigTab::on_edit_endpoint(const std::string &id)
@@ -192,11 +217,9 @@ void ConfigTab::on_edit_endpoint(const std::string &id)
 	if (!ep_ptr)
 		return;
 
-	Endpoint ep = *ep_ptr; // copy
-	EndpointDialog dlg(ep, m_registry, this);
-	if (dlg.exec() == QDialog::Accepted) {
+	EndpointDialog dlg(*ep_ptr, m_registry, this);
+	if (dlg.exec() == QDialog::Accepted)
 		m_registry.update(dlg.result_endpoint());
-	}
 }
 
 void ConfigTab::on_toggle_endpoint(const std::string &id, bool enabled)
@@ -206,16 +229,34 @@ void ConfigTab::on_toggle_endpoint(const std::string &id, bool enabled)
 		return;
 
 	Endpoint updated = *ep_ptr;
-	updated.enabled  = enabled;
+	updated.enabled = enabled;
 
 	if (!enabled) {
-		/* Stop the output if it was running */
 		auto ctrl = m_registry.controller_for(id);
-		if (ctrl && ctrl->is_running())
+		if (ctrl)
 			ctrl->stop();
 	}
 
 	m_registry.update(updated);
+}
+
+void ConfigTab::on_manual_start_stop(const std::string &id)
+{
+	const Endpoint *ep = m_registry.find(id);
+	if (!ep || !ep->enabled || ep->linked_to_main)
+		return;
+
+	auto ctrl = m_registry.controller_for(id);
+	if (!ctrl)
+		return;
+
+	OutputState state = ctrl->state();
+	if (state == OutputState::Idle || state == OutputState::FailedHard)
+		ctrl->start();
+	else
+		ctrl->stop();
+
+	refresh_runtime_states();
 }
 
 void ConfigTab::on_delete_endpoint(const std::string &id)
@@ -224,48 +265,57 @@ void ConfigTab::on_delete_endpoint(const std::string &id)
 	if (!ep_ptr)
 		return;
 
-	QString name = QString::fromStdString(ep_ptr->name);
 	auto reply = QMessageBox::question(
 		this,
 		tr("Remove Endpoint"),
-		tr("Remove endpoint \"%1\"?").arg(name),
-		QMessageBox::Yes | QMessageBox::No
-	);
+		tr("Remove endpoint \"%1\"?").arg(QString::fromStdString(ep_ptr->name)),
+		QMessageBox::Yes | QMessageBox::No);
 	if (reply == QMessageBox::Yes)
 		m_registry.remove(id);
 }
 
 void ConfigTab::on_list_reorder()
 {
-	/* Collect the new ordering from QListWidget */
 	std::vector<std::string> ordered_ids;
 	ordered_ids.reserve(m_list->count());
+	for (int i = 0; i < m_list->count(); ++i)
+		ordered_ids.push_back(m_list->item(i)->data(Qt::UserRole).toString().toStdString());
+	m_registry.reorder(ordered_ids);
+}
+
+void ConfigTab::refresh_runtime_states()
+{
 	for (int i = 0; i < m_list->count(); ++i) {
 		auto *item = m_list->item(i);
-		ordered_ids.push_back(item->data(Qt::UserRole).toString().toStdString());
+		auto *card = qobject_cast<EndpointCard *>(m_list->itemWidget(item));
+		if (!card)
+			continue;
+
+		auto ctrl = m_registry.controller_for(card->endpoint_id());
+		if (ctrl)
+			card->update_runtime(ctrl->state(), ctrl->last_error());
+		else
+			card->update_runtime(OutputState::Idle, {});
 	}
-	m_registry.reorder(ordered_ids);
 }
 
 void ConfigTab::on_registry_changed(ChangeKind kind, const Endpoint &ep)
 {
-	Q_UNUSED(ep)
-	/* Simplest approach: always rebuild the full list.
-	 * For v1.1: diff-based update to preserve scroll position. */
-	if (kind == ChangeKind::Added || kind == ChangeKind::Removed)
+	if (kind == ChangeKind::Added || kind == ChangeKind::Removed) {
 		rebuild_list();
-	else {
-		/* Updated — refresh the matching card */
-		for (int i = 0; i < m_list->count(); ++i) {
-			auto *item = m_list->item(i);
-			if (item->data(Qt::UserRole).toString().toStdString() == ep.id) {
-				auto *card = qobject_cast<EndpointCard *>(m_list->itemWidget(item));
-				if (card)
-					card->update_state(ep);
-				break;
-			}
-		}
+		return;
 	}
+
+	for (int i = 0; i < m_list->count(); ++i) {
+		auto *item = m_list->item(i);
+		if (item->data(Qt::UserRole).toString().toStdString() != ep.id)
+			continue;
+		auto *card = qobject_cast<EndpointCard *>(m_list->itemWidget(item));
+		if (card)
+			card->update_state(ep);
+		break;
+	}
+	refresh_runtime_states();
 }
 
 } // namespace smulti
