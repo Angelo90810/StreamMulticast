@@ -277,49 +277,34 @@ bool OutputController::start()
 		m_audio_enc = audio_enc;
 	}
 
+	/* -------------------------------------------------------------------
+	 * OBS 32 compatibility
+	 *
+	 * obs_output_set_video_conversion() is only valid for raw outputs.
+	 * StreamMulticast uses encoded RTMP outputs, so OBS 32 rejects the old
+	 * vertical path before the RTMP connection is even attempted.
+	 *
+	 * Configure scaling on the video encoder itself before initialization.
+	 * This is the supported libobs path for encoded outputs.
+	 * ------------------------------------------------------------------- */
+	if (m_endpoint.orientation == OutputOrientation::Vertical1080x1920Letterbox ||
+	    m_endpoint.orientation == OutputOrientation::Vertical1080x1920CenterCrop) {
+		obs_encoder_set_scaled_size(video_enc, 1080, 1920);
+		obs_encoder_set_gpu_scale_type(video_enc, OBS_SCALE_BICUBIC);
+		obs_log(LOG_INFO,
+		        "OutputController [%s]: vertical encoder scaling enabled (1080x1920)",
+		        m_endpoint.name.c_str());
+
+		if (m_endpoint.orientation == OutputOrientation::Vertical1080x1920CenterCrop) {
+			obs_log(LOG_WARNING,
+			        "OutputController [%s]: center-crop is not implemented; "
+			        "using the safe 1080x1920 encoder-rescale path.",
+			        m_endpoint.name.c_str());
+		}
+	}
+
 	obs_output_set_video_encoder(output, video_enc);
 	obs_output_set_audio_encoder(output, audio_enc, 0 /* track index */);
-
-	/* -------------------------------------------------------------------
-	 * v1.0.5 — Per-Output Orientation (Vertical-Letterbox path)
-	 *
-	 * For Vertical1080x1920Letterbox we tell the output's video pipeline to
-	 * convert frames to a 1080×1920 target.  OBS's internal scaler letterboxes
-	 * the 16:9 main canvas inside the 9:16 frame (black bars top+bottom).
-	 *
-	 * Center-Crop (Vertical1080x1920CenterCrop) is reserved for v1.1 — it
-	 * requires a per-output obs_view_t with custom render code that crops the
-	 * centre 9:16 slice instead of letterboxing.  Disabled in the UI for now.
-	 *
-	 * SourceMatch: no conversion call — output uses the OBS main canvas as-is.
-	 * ------------------------------------------------------------------- */
-	if (m_endpoint.orientation == OutputOrientation::Vertical1080x1920Letterbox) {
-		struct video_scale_info scale = {};
-		scale.format     = VIDEO_FORMAT_NV12;     /* common encoder input format */
-		scale.width      = 1080;
-		scale.height     = 1920;
-		scale.range      = VIDEO_RANGE_DEFAULT;
-		scale.colorspace = VIDEO_CS_DEFAULT;
-		obs_output_set_video_conversion(output, &scale);
-		obs_log(LOG_INFO,
-		        "OutputController [%s]: orientation=Vertical1080x1920 (Letterbox), "
-		        "video conversion enabled (1080×1920)",
-		        m_endpoint.name.c_str());
-	}
-	else if (m_endpoint.orientation == OutputOrientation::Vertical1080x1920CenterCrop) {
-		/* Should not happen — UI disables this option.  Defensive fallback to letterbox. */
-		obs_log(LOG_WARNING,
-		        "OutputController [%s]: Vertical1080x1920CenterCrop is v1.1, "
-		        "falling back to letterbox.", m_endpoint.name.c_str());
-		struct video_scale_info scale = {};
-		scale.format     = VIDEO_FORMAT_NV12;
-		scale.width      = 1080;
-		scale.height     = 1920;
-		scale.range      = VIDEO_RANGE_DEFAULT;
-		scale.colorspace = VIDEO_CS_DEFAULT;
-		obs_output_set_video_conversion(output, &scale);
-	}
-	/* SourceMatch: no conversion, output uses OBS main canvas directly. */
 
 	bool started = obs_output_start(output);
 	if (!started) {
