@@ -253,8 +253,10 @@ void obs_module_unload()
 	 * detach: a detached thread would keep running inside this DLL's code
 	 * segment after Windows unloads it, a guaranteed use-after-free. */
 	g_registry.reset();
-	if (g_reaper)
-		g_reaper->shutdown();
+
+	/* Reaper destruction is the shutdown barrier. Keeping shutdown private
+	 * removes the former alive-but-closed window in which a late producer
+	 * could enqueue after shutdown but before object destruction. */
 	g_reaper.reset();
 
 	g_config_store.reset();
