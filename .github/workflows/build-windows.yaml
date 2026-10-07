@@ -47,7 +47,20 @@ jobs:
         run: cmake --build --preset windows-ci-x64 --config ${{ matrix.config }}
 
       - name: Run core regression tests
-        run: ctest --test-dir build_x64 -C ${{ matrix.config }} --output-on-failure
+        shell: pwsh
+        run: |
+          # The test executable links against libobs from the downloaded OBS
+          # dependency tree. Visual Studio can link it without the runtime DLL
+          # being on PATH, but CTest cannot launch it unless Windows can resolve
+          # that DLL and its sibling dependencies.
+          $dllDirs = Get-ChildItem -Path ".deps" -Recurse -File -Filter "*.dll" |
+            ForEach-Object { $_.DirectoryName } |
+            Sort-Object -Unique
+          if (-not $dllDirs) {
+            throw "No runtime DLL directories found under .deps"
+          }
+          $env:PATH = (($dllDirs -join ";") + ";" + $env:PATH)
+          ctest --test-dir build_x64 -C ${{ matrix.config }} --output-on-failure
 
       - name: Validate TikTok bridge script
         shell: pwsh
