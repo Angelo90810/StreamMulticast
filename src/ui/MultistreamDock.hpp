@@ -44,6 +44,9 @@ public:
 	                         QWidget          *parent = nullptr);
 	~MultistreamDock() override = default;
 
+	QSize minimumSizeHint() const override { return QSize(0, 0); }
+	QSize sizeHint() const override { return QSize(280, 260); }
+
 	void on_obs_frontend_ready();
 
 private:
