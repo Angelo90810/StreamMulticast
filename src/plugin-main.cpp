@@ -30,6 +30,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <QMainWindow>
 #include <QAction>
+#include <QTimer>
 #include <memory>
 
 OBS_DECLARE_MODULE()
@@ -42,7 +43,69 @@ static std::unique_ptr<smulti::ControllerReaper>  g_reaper;
 static std::unique_ptr<smulti::ConfigStore>      g_config_store;
 static std::unique_ptr<smulti::EndpointRegistry> g_registry;
 static std::unique_ptr<smulti::HealthSampler>    g_health_sampler;
+static std::unique_ptr<QTimer>                    g_lifecycle_timer;
 static smulti::MultistreamDock *                 g_dock = nullptr; /* owned by Qt only if registration succeeded — see obs_module_load */
+
+/* -----------------------------------------------------------------------
+ * Lifecycle coordinator
+ *
+ * Runs independently of the dock/UI.  The UI may disappear, fail to
+ * register, or simply be closed; linked outputs and deferred live-edit
+ * restarts must continue to obey the OBS main-stream state regardless.
+ * ----------------------------------------------------------------------- */
+static void reconcile_output_lifecycle()
+{
+	if (!g_registry)
+		return;
+
+	const bool main_active = obs_frontend_streaming_active();
+
+	for (const auto &ep : g_registry->all()) {
+		auto ctrl = g_registry->controller_for(ep.id);
+		if (!ctrl)
+			continue;
+
+		if (!ep.enabled) {
+			ctrl->cancel_start_request();
+			if (ctrl->has_session_resources())
+				ctrl->stop();
+			continue;
+		}
+
+		if (ep.linked_to_main) {
+			if (!main_active) {
+				/* This also fixes Manual -> Linked while OBS is stopped:
+				 * an already-live manual endpoint is brought into line with
+				 * the new automatic policy instead of remaining live. */
+				ctrl->cancel_start_request();
+				if (ctrl->has_session_resources())
+					ctrl->stop();
+				continue;
+			}
+
+			/* Do not hammer a real FailedHard every timer tick.  Idle means
+			 * a fresh/reenabled endpoint; Stopping/start_blocked means a
+			 * valid deferred start is waiting on asynchronous teardown. */
+			const auto state = ctrl->state();
+			if (state == smulti::OutputState::Idle ||
+			    state == smulti::OutputState::Stopping ||
+			    ctrl->start_blocked() ||
+			    ctrl->start_requested()) {
+				ctrl->request_start_when_ready();
+			}
+			continue;
+		}
+
+		/* A manual endpoint only has a pending request when a previously-live
+		 * controller was replaced by a structural edit.  Preserve that live
+		 * intent without making manual endpoints auto-start in general. */
+		if (ctrl->start_requested() &&
+		    !ctrl->start_blocked() &&
+		    ctrl->state() != smulti::OutputState::Stopping) {
+			ctrl->request_start_when_ready();
+		}
+	}
+}
 
 /* -----------------------------------------------------------------------
  * OBS frontend-event handler
@@ -54,25 +117,11 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 		return;
 
 	if (event == OBS_FRONTEND_EVENT_STREAMING_STARTED) {
-		obs_log(LOG_INFO, "OBS main stream started — triggering linked endpoints");
-		for (auto &ep : g_registry->all()) {
-			if (ep.enabled && ep.linked_to_main) {
-				auto ctrl = g_registry->controller_for(ep.id);
-				if (ctrl)
-					ctrl->request_start_when_ready();
-			}
-		}
+		obs_log(LOG_INFO, "OBS main stream started — reconciling linked endpoints");
+		reconcile_output_lifecycle();
 	} else if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPED) {
-		obs_log(LOG_INFO, "OBS main stream stopped — stopping linked endpoints");
-		for (auto &ep : g_registry->all()) {
-			if (ep.linked_to_main) {
-				auto ctrl = g_registry->controller_for(ep.id);
-				if (ctrl) {
-					ctrl->cancel_start_request();
-					ctrl->stop();
-				}
-			}
-		}
+		obs_log(LOG_INFO, "OBS main stream stopped — reconciling linked endpoints");
+		reconcile_output_lifecycle();
 	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED ||
 	           event == OBS_FRONTEND_EVENT_TRANSITION_CHANGED) {
 		/* Rotated endpoints render OBS output channel 0 (the Program
@@ -120,10 +169,16 @@ bool obs_module_load()
 	g_health_sampler = std::make_unique<smulti::HealthSampler>(*g_registry);
 	g_health_sampler->start();
 
-	/* 5. Register frontend event handler (for linked-to-main-stream behaviour) */
-	// AVANATRO-VERIFY: obs_frontend_add_event_callback signature — verify it exists in
-	// obs-frontend-api.h for OBS 30+ (it does in OBS 30.x, but confirm 31.x didn't rename it).
+	/* 5. Register frontend event handler and the UI-independent lifecycle
+	 * coordinator.  The timer is module-owned, not dock-owned, so deferred
+	 * starts continue to resolve even if the dock is closed/unavailable. */
 	obs_frontend_add_event_callback(on_frontend_event, nullptr);
+	g_lifecycle_timer = std::make_unique<QTimer>();
+	g_lifecycle_timer->setInterval(250);
+	QObject::connect(g_lifecycle_timer.get(), &QTimer::timeout, []() {
+		reconcile_output_lifecycle();
+	});
+	g_lifecycle_timer->start();
 
 	/* 6. Create and register the dock widget
 	 * obs_frontend_add_dock_by_id was added in OBS 30.0.
@@ -154,18 +209,9 @@ bool obs_module_load()
 		g_dock = nullptr;
 	}
 
-	/* Plugin reloads can happen while OBS is already streaming. Catch up
-	 * linked endpoints instead of relying exclusively on a future frontend
-	 * STREAMING_STARTED event. */
-	if (obs_frontend_streaming_active()) {
-		for (auto &ep : g_registry->all()) {
-			if (!ep.enabled || !ep.linked_to_main)
-				continue;
-			auto ctrl = g_registry->controller_for(ep.id);
-			if (ctrl)
-				ctrl->request_start_when_ready();
-		}
-	}
+	/* Catch up linked endpoints immediately, including plugin reload while
+	 * OBS is already live. The timer keeps this invariant true afterwards. */
+	reconcile_output_lifecycle();
 
 	obs_log(LOG_INFO, "StreamMulticast v%s loaded successfully", PLUGIN_VERSION);
 	return true;
@@ -179,6 +225,10 @@ void obs_module_unload()
 	obs_log(LOG_INFO, "StreamMulticast unloading");
 
 	obs_frontend_remove_event_callback(on_frontend_event, nullptr);
+	if (g_lifecycle_timer) {
+		g_lifecycle_timer->stop();
+		g_lifecycle_timer.reset();
+	}
 
 	/* Request every output to stop, unconditionally — no is_running() gate
 	 * (fix-round 2, 2026-07-07).  is_running() excludes Reconnecting, which
