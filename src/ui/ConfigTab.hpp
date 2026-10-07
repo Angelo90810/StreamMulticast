@@ -15,7 +15,6 @@ GPLv2 — see LICENSE for full text.
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QCheckBox>
 #include <QtCore/QTimer>
-#include <unordered_set>
 
 namespace smulti {
 
@@ -78,10 +77,6 @@ private:
 	QListWidget *m_list {nullptr};
 	QPushButton *m_add_btn {nullptr};
 	QTimer *m_runtime_timer {nullptr};
-
-	/* UI-owned deferred starts. No raw Qt/libobs callback is queued past the
-	 * lifetime of this widget, which keeps plugin unload safe. */
-	std::unordered_set<std::string> m_pending_starts;
 
 	int m_observer_token = -1;
 };
