@@ -213,22 +213,22 @@ void ConfigTab::on_add_endpoint()
 
 void ConfigTab::on_edit_endpoint(const std::string &id)
 {
-	const Endpoint *ep_ptr = m_registry.find(id);
-	if (!ep_ptr)
+	auto ep = m_registry.find(id);
+	if (!ep)
 		return;
 
-	EndpointDialog dlg(*ep_ptr, m_registry, this);
+	EndpointDialog dlg(*ep, m_registry, this);
 	if (dlg.exec() == QDialog::Accepted)
 		m_registry.update(dlg.result_endpoint());
 }
 
 void ConfigTab::on_toggle_endpoint(const std::string &id, bool enabled)
 {
-	const Endpoint *ep_ptr = m_registry.find(id);
-	if (!ep_ptr)
+	auto ep = m_registry.find(id);
+	if (!ep)
 		return;
 
-	Endpoint updated = *ep_ptr;
+	Endpoint updated = *ep;
 	updated.enabled = enabled;
 
 	if (!enabled) {
@@ -242,7 +242,7 @@ void ConfigTab::on_toggle_endpoint(const std::string &id, bool enabled)
 
 void ConfigTab::on_manual_start_stop(const std::string &id)
 {
-	const Endpoint *ep = m_registry.find(id);
+	auto ep = m_registry.find(id);
 	if (!ep || !ep->enabled || ep->linked_to_main)
 		return;
 
@@ -261,14 +261,14 @@ void ConfigTab::on_manual_start_stop(const std::string &id)
 
 void ConfigTab::on_delete_endpoint(const std::string &id)
 {
-	const Endpoint *ep_ptr = m_registry.find(id);
-	if (!ep_ptr)
+	auto ep = m_registry.find(id);
+	if (!ep)
 		return;
 
 	auto reply = QMessageBox::question(
 		this,
 		tr("Remove Endpoint"),
-		tr("Remove endpoint \"%1\"?").arg(QString::fromStdString(ep_ptr->name)),
+		tr("Remove endpoint \"%1\"?").arg(QString::fromStdString(ep->name)),
 		QMessageBox::Yes | QMessageBox::No);
 	if (reply == QMessageBox::Yes)
 		m_registry.remove(id);
