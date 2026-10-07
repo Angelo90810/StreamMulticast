@@ -477,7 +477,8 @@ void EndpointDialog::on_save()
 
 	const QUrl server_url(m_server_edit->text().trimmed());
 	const QString scheme = server_url.scheme().toLower();
-	if (!server_url.isValid() || (scheme != "rtmp" && scheme != "rtmps")) {
+	if (!server_url.isValid() || server_url.host().trimmed().isEmpty() ||
+	    (scheme != "rtmp" && scheme != "rtmps")) {
 		QMessageBox::warning(
 			this, tr("Validation"),
 			tr("Server URL must be a valid rtmp:// or rtmps:// address."));
