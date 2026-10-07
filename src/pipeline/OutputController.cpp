@@ -151,6 +151,21 @@ void OutputController::retire()
 	m_stop_reconnect.store(true);
 }
 
+void OutputController::begin_handoff_wait()
+{
+	std::lock_guard<std::mutex> lock(m_mutex);
+	if (!m_output && m_state == OutputState::Idle)
+		m_state = OutputState::Stopping;
+}
+
+void OutputController::finish_handoff_wait()
+{
+	std::lock_guard<std::mutex> lock(m_mutex);
+	if (!m_retired.load() && !m_shutdown_done.load() &&
+	    !m_output && m_state == OutputState::Stopping)
+		m_state = OutputState::Idle;
+}
+
 std::string OutputController::last_error() const
 {
 	std::lock_guard<std::mutex> lock(m_mutex);
