@@ -903,8 +903,10 @@ void OutputController::on_start_signal(void *data, calldata_t * /*cd*/)
 	auto *self = static_cast<OutputController *>(data);
 	{
 		std::lock_guard<std::mutex> lock(self->m_mutex);
-		self->m_state           = OutputState::Live;
-		self->m_connected_since = std::chrono::steady_clock::now();
+		self->m_state             = OutputState::Live;
+		self->m_connected_since   = std::chrono::steady_clock::now();
+		self->m_reconnect_attempt = 0;
+		self->m_last_error.clear();
 	}
 	obs_log(LOG_INFO, "OutputController [%s]: stream started (Live)",
 	        self->m_endpoint.name.c_str());
