@@ -102,6 +102,18 @@ bool ConfigStore::load()
  * ----------------------------------------------------------------------- */
 bool ConfigStore::save(const std::vector<Endpoint> &endpoints)
 {
+	/* Invalidate every background snapshot captured before this synchronous
+	 * save. Without a generation, a worker that had already copied an older
+	 * pending endpoint list could acquire m_mutex AFTER this function and
+	 * overwrite the final unload save with stale data. */
+	const uint64_t generation = m_save_generation.fetch_add(1) + 1;
+	{
+		std::lock_guard<std::mutex> pending_lock(m_pending_mutex);
+		m_pending_endpoints = endpoints;
+		m_pending_generation = generation;
+		m_save_pending.store(false);
+	}
+
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_endpoints = endpoints;
 
@@ -121,11 +133,12 @@ bool ConfigStore::save(const std::vector<Endpoint> &endpoints)
  * ----------------------------------------------------------------------- */
 void ConfigStore::schedule_save(const std::vector<Endpoint> &endpoints)
 {
+	const uint64_t generation = m_save_generation.fetch_add(1) + 1;
 	std::lock_guard<std::mutex> lock(m_pending_mutex);
 	m_pending_endpoints   = endpoints;
+	m_pending_generation  = generation;
 	m_last_change_request = std::chrono::steady_clock::now();
 	m_save_pending.store(true);
-	/* The save_thread_func() will pick this up within SAVE_DEBOUNCE_MS */
 }
 
 /* -----------------------------------------------------------------------
@@ -142,12 +155,14 @@ void ConfigStore::save_thread_func()
 			continue;
 
 		std::vector<Endpoint> to_save;
+		uint64_t generation = 0;
 		bool should_save = false;
 		{
 			std::lock_guard<std::mutex> lock(m_pending_mutex);
 			auto elapsed = duration_cast<milliseconds>(steady_clock::now() - m_last_change_request);
 			if (elapsed.count() >= SAVE_DEBOUNCE_MS) {
 				to_save = m_pending_endpoints;
+				generation = m_pending_generation;
 				m_save_pending.store(false);
 				should_save = true;
 			}
@@ -162,6 +177,11 @@ void ConfigStore::save_thread_func()
 
 		if (should_save) {
 			std::lock_guard<std::mutex> lock(m_mutex);
+			/* A newer schedule_save()/save() wins.  This check is done while
+			 * holding m_mutex so an older worker snapshot can never write
+			 * after a newer synchronous save. */
+			if (generation != m_save_generation.load())
+				continue;
 			m_endpoints = to_save;
 			if (!m_config_path.empty())
 				write_to_disk(to_save, m_config_path);
@@ -170,10 +190,20 @@ void ConfigStore::save_thread_func()
 
 	/* Final flush if something was pending when we shut down */
 	if (m_save_pending.load()) {
-		std::lock_guard<std::mutex> pending_lock(m_pending_mutex);
+		std::vector<Endpoint> pending;
+		uint64_t generation = 0;
+		{
+			std::lock_guard<std::mutex> pending_lock(m_pending_mutex);
+			pending = m_pending_endpoints;
+			generation = m_pending_generation;
+			m_save_pending.store(false);
+		}
 		std::lock_guard<std::mutex> main_lock(m_mutex);
-		if (!m_config_path.empty())
-			write_to_disk(m_pending_endpoints, m_config_path);
+		if (generation == m_save_generation.load()) {
+			m_endpoints = pending;
+			if (!m_config_path.empty())
+				write_to_disk(pending, m_config_path);
+		}
 	}
 }
 
