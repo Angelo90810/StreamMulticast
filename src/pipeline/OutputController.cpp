@@ -461,6 +461,32 @@ bool OutputController::start()
 		return false;
 	}
 
+	/* A previous hard failure can leave an inactive output with encoder
+	 * references still attached.  Detach those output-owned refs and release
+	 * our own before constructing a retry, otherwise repeated manual Starts
+	 * slowly accumulate stale encoders (particularly painful with NVENC
+	 * session limits). */
+	if (!obs_output_active(output)) {
+		obs_encoder_t *stale_video = nullptr;
+		obs_encoder_t *stale_audio = nullptr;
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			stale_video = m_video_enc;
+			stale_audio = m_audio_enc;
+			m_video_enc = nullptr;
+			m_audio_enc = nullptr;
+		}
+
+		if (stale_video || stale_audio) {
+			obs_output_set_video_encoder(output, nullptr);
+			obs_output_set_audio_encoder(output, nullptr, 0);
+			if (stale_video)
+				obs_encoder_release(stale_video);
+			if (stale_audio)
+				obs_encoder_release(stale_audio);
+		}
+	}
+
 	/* Create and attach encoders */
 	obs_encoder_t *video_enc = m_factory.create_video_encoder(m_endpoint, "smulti");
 	obs_encoder_t *audio_enc = m_factory.create_audio_encoder(m_endpoint, "smulti");
