@@ -176,6 +176,11 @@ public:
 	void unblock_start();
 	bool start_blocked() const { return m_start_blocked.load(); }
 
+	/** Registry handoff helpers: expose Stopping while the previous live
+	 * controller is being reaped, then reopen starts once teardown is done. */
+	void begin_handoff_wait();
+	void finish_handoff_wait();
+
 	/** Current state */
 	OutputState state() const;
 
