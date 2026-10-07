@@ -33,13 +33,13 @@ static std::string resolve_service_server(const std::string &service_name)
 	if (service_name == "Twitch")
 		return "rtmp://live.twitch.tv/app";
 	if (service_name == "YouTube - RTMPS")
-		return "rtmps://a.rtmps.youtube.com/live2";
+		return "rtmps://a.rtmps.youtube.com:443/live2";
 	if (service_name == "Facebook Live")
 		return "rtmps://rtmp-api.facebook.com:443/rtmp/";
 	if (service_name == "Kick")
 		return "rtmps://fa723fc1b171.global-contribute.live-video.net/app";
 	if (service_name == "Trovo")
-		return "rtmp://livepush.trovo.live/push";
+		return "rtmp://livepush.trovo.live/live/";
 	if (service_name == "Restream.io - RTMP")
 		return "rtmp://live.restream.io/live";
 	return {};
