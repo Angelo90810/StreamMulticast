@@ -16,6 +16,7 @@ GPLv2 — see LICENSE for full text.
 #include <mutex>
 #include <memory>
 #include <unordered_map>
+#include <optional>
 
 namespace smulti {
 
@@ -77,8 +78,9 @@ public:
 	/** All endpoints, sorted by sort_order */
 	std::vector<Endpoint> all() const;
 
-	/** Find by UUID, returns nullptr if not found */
-	const Endpoint *find(const std::string &id) const;
+	/** Find by UUID. Returns a COPY so callers never keep a pointer into
+	 * m_endpoints after m_mutex is released. */
+	std::optional<Endpoint> find(const std::string &id) const;
 
 	/**
 	 * OutputController for the given endpoint UUID (nullptr if not found).
