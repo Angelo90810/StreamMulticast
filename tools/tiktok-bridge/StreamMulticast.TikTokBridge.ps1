@@ -128,10 +128,24 @@ if ($PSBoundParameters.ContainsKey('StreamKey')) {
     Write-Warning "Passing -StreamKey on the command line may leave the key in shell history. Prefer the secure prompt or clipboard import."
 }
 
+# Protect the handoff key with Windows DPAPI (CurrentUser) so the bridge
+# file never leaves a reusable TikTok stream key in plaintext at rest.
+$keyBytes = [Text.Encoding]::UTF8.GetBytes($StreamKey)
+$protectedBytes = [Security.Cryptography.ProtectedData]::Protect(
+    $keyBytes,
+    $null,
+    [Security.Cryptography.DataProtectionScope]::CurrentUser
+)
+try {
+    $protectedHex = -join ($protectedBytes | ForEach-Object { $_.ToString("x2") })
+} finally {
+    [Array]::Clear($keyBytes, 0, $keyBytes.Length)
+}
+
 $payload = [ordered]@{
     name = $Name
     server_url = $ServerUrl
-    stream_key = $StreamKey
+    stream_key_protected = "dpapi:$protectedHex"
 }
 if ($ExpiresAt) {
     $payload.expires_at = $ExpiresAt
