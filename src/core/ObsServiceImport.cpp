@@ -32,8 +32,6 @@ static std::string resolve_service_server(const std::string &service_name)
 {
 	if (service_name == "Twitch")
 		return "rtmp://live.twitch.tv/app";
-	if (service_name == "YouTube - HLS")
-		return "rtmps://a.rtmps.youtube.com/live2";
 	if (service_name == "YouTube - RTMPS")
 		return "rtmps://a.rtmps.youtube.com/live2";
 	if (service_name == "Facebook Live")
@@ -55,6 +53,18 @@ static bool try_import_live_obs_service(ObsServiceConfig &cfg)
 
 	obs_service_t *service = obs_output_get_service(output);
 	if (!service) {
+		obs_output_release(output);
+		return false;
+	}
+
+	/* StreamMulticast currently creates rtmp_output endpoints only. Do not
+	 * silently convert WHIP/HLS/SRT/etc. OBS profiles into a bogus RTMP
+	 * endpoint just because they also expose a URL/key-like pair. */
+	const char *protocol_raw = obs_service_get_protocol(service);
+	const std::string protocol = protocol_raw ? protocol_raw : "";
+	if (!protocol.empty() && protocol != "RTMP" && protocol != "RTMPS") {
+		cfg.error_message = "Active OBS service uses unsupported protocol '" +
+		                    protocol + "'; StreamMulticast endpoints require RTMP/RTMPS";
 		obs_output_release(output);
 		return false;
 	}
@@ -102,6 +112,8 @@ ObsServiceConfig import_from_active_obs_profile()
 	 * have not yet materialized their service object. */
 	if (try_import_live_obs_service(cfg))
 		return cfg;
+	if (!cfg.error_message.empty())
+		return cfg;
 
 	/* Ask OBS for the exact active profile directory.  Profile display
 	 * names and directory names can differ (ProfileDir), so reconstructing
@@ -140,6 +152,14 @@ ObsServiceConfig import_from_active_obs_profile()
 		obs_data_release(settings);
 	}
 	obs_data_release(data);
+
+	/* HLS cannot be represented by this plugin's RTMP output. Never
+	 * substitute an RTMP URL for an HLS profile and pretend settings were
+	 * inherited faithfully. */
+	if (cfg.service_name == "YouTube - HLS") {
+		cfg.error_message = "The active OBS profile uses YouTube HLS; switch OBS to an RTMP/RTMPS service or enter an RTMP endpoint manually";
+		return cfg;
+	}
 
 	/* 5. Resolve "auto" / empty server via service-name → RTMP-URL map */
 	if (cfg.server_url == "auto" || cfg.server_url.empty()) {
