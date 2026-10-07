@@ -349,7 +349,11 @@ void YouTubeClient::create_broadcast(const QString &access_token,
 	QJsonObject status;
 	status.insert(QStringLiteral("privacyStatus"), privacy_string(plan.privacy));
 
+	QJsonObject monitor_stream;
+	monitor_stream.insert(QStringLiteral("enableMonitorStream"), false);
+
 	QJsonObject content_details;
+	content_details.insert(QStringLiteral("monitorStream"), monitor_stream);
 	content_details.insert(QStringLiteral("enableAutoStart"), true);
 	content_details.insert(QStringLiteral("enableAutoStop"), true);
 	content_details.insert(QStringLiteral("enableDvr"), true);
