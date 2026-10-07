@@ -6,6 +6,7 @@ GPLv2 — see LICENSE for full text.
 */
 
 #include "Endpoint.hpp"
+#include "SecretStore.hpp"
 
 #include <obs-data.h>
 
@@ -76,7 +77,15 @@ obs_data_t *Endpoint::serialize() const
 	obs_data_set_string(data, "id", id.c_str());
 	obs_data_set_string(data, "name", name.c_str());
 	obs_data_set_string(data, "server_url", server_url.c_str());
-	obs_data_set_string(data, "stream_key", stream_key.c_str());
+
+	std::string protected_key;
+	if (protect_secret(stream_key, protected_key)) {
+		obs_data_set_string(data, "stream_key_protected", protected_key.c_str());
+	} else {
+		/* Non-Windows compatibility path until native keychain backends are
+		 * implemented. Existing configs remain readable everywhere. */
+		obs_data_set_string(data, "stream_key", stream_key.c_str());
+	}
 
 	obs_data_set_int(data, "video_settings_mode", static_cast<long long>(video_settings_mode));
 	obs_data_set_int(data, "video_codec", static_cast<long long>(video_codec));
@@ -104,7 +113,19 @@ Endpoint Endpoint::deserialize(obs_data_t *data)
 	ep.id = obs_data_get_string(data, "id");
 	ep.name = obs_data_get_string(data, "name");
 	ep.server_url = obs_data_get_string(data, "server_url");
-	ep.stream_key = obs_data_get_string(data, "stream_key");
+
+	if (obs_data_has_user_value(data, "stream_key_protected")) {
+		const char *protected_raw = obs_data_get_string(data, "stream_key_protected");
+		std::string decrypted;
+		if (protected_raw && unprotect_secret(protected_raw, decrypted))
+			ep.stream_key = std::move(decrypted);
+		else
+			ep.stream_key.clear();
+	} else {
+		/* v1/v2 compatibility: plaintext keys migrate to protected storage
+		 * automatically on the next successful save on Windows. */
+		ep.stream_key = obs_data_get_string(data, "stream_key");
+	}
 
 	/* Missing v2 keys deliberately preserve the old endpoint behaviour. */
 	int video_mode = obs_data_has_user_value(data, "video_settings_mode")
