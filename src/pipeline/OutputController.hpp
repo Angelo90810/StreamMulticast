@@ -25,6 +25,8 @@ struct obs_output;
 typedef struct obs_output obs_output_t;
 struct obs_encoder;
 typedef struct obs_encoder obs_encoder_t;
+struct obs_service;
+typedef struct obs_service obs_service_t;
 struct calldata;
 typedef struct calldata calldata_t;
 struct obs_scene;
@@ -46,7 +48,7 @@ class ControllerReaper;
  * Transitions:
  *   Idle → Starting → Live → Reconnecting → Live
  *                          ↘ FailedHard
- *   Any → Idle (via stop())
+ *   Any → Stopping → Idle (via stop())
  */
 enum class OutputState : int {
 	Idle         = 0,
@@ -54,6 +56,7 @@ enum class OutputState : int {
 	Live         = 2,
 	Reconnecting = 3,
 	FailedHard   = 4,
+	Stopping     = 5,
 };
 
 /**
@@ -84,7 +87,7 @@ int reconnect_delay_seconds(int attempt, int max_attempts = 10);
  * "stop" signal handlers (so no late signal can ever touch this controller
  * again), then — under m_mutex — extracts m_output, m_video_enc, m_audio_enc
  * and m_reconnect_thread into locals and clears its own fields (state goes
- * to Idle immediately, from the caller's point of view).  It then hands those
+ * to Stopping until the reaper has actually released the detached session).  It then hands those
  * extracted resources, plus a shared_from_this() pin, to the
  * ControllerReaper as one job that joins the reconnect thread, force-stops
  * the output, and releases everything — off the Qt UI thread.  This replaces
@@ -151,8 +154,11 @@ public:
 	 */
 	void stop();
 
-	/** Is the output currently live (OutputState::Live)? */
+	/** True while this endpoint owns an active start/reconnect session. */
 	bool is_running() const;
+
+	/** Explicit alias used by registry/frontend code when preserving intent. */
+	bool has_active_session() const;
 
 	/** Current state */
 	OutputState state() const;
@@ -179,6 +185,11 @@ public:
 		bool     active         {false};
 		uint64_t total_bytes    {0};
 		int      frames_dropped {0};
+		OutputState state       {OutputState::Idle};
+		int      target_bitrate_kbps {-1};
+		int      reconnect_count {0};
+		std::chrono::steady_clock::time_point connected_since{};
+		std::string last_error;
 	};
 
 	/**
@@ -260,8 +271,13 @@ private:
 	int                 m_reconnect_attempt {0};
 
 	obs_output_t       *m_output   {nullptr};
+	obs_service_t      *m_service  {nullptr};
 	obs_encoder_t      *m_video_enc{nullptr};
 	obs_encoder_t      *m_audio_enc{nullptr};
+
+	int                 m_effective_video_bitrate_kbps {-1};
+	int                 m_effective_audio_bitrate_kbps {-1};
+	int                 m_total_reconnects {0};
 
 	/* Dedicated render path for Vertical1080x1920Rotated.  Kept for the
 	 * controller lifetime so manual stop/start can reuse it cheaply. */
@@ -269,6 +285,7 @@ private:
 	obs_sceneitem_t    *m_rotated_item  {nullptr};
 	obs_view_t         *m_rotated_view  {nullptr};
 	video_t            *m_rotated_video {nullptr};
+	mutable std::recursive_mutex m_rotated_mutex;
 
 	std::chrono::steady_clock::time_point m_connected_since{};
 
