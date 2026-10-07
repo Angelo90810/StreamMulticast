@@ -145,6 +145,12 @@ bool OutputController::has_active_session() const
 	return is_running();
 }
 
+void OutputController::retire()
+{
+	m_retired.store(true);
+	m_stop_reconnect.store(true);
+}
+
 std::string OutputController::last_error() const
 {
 	std::lock_guard<std::mutex> lock(m_mutex);
@@ -398,7 +404,7 @@ bool OutputController::start()
 {
 	std::lock_guard<std::mutex> lifecycle_lock(m_lifecycle_mutex);
 
-	if (!m_endpoint.enabled || m_shutdown_done.load()) {
+	if (!m_endpoint.enabled || m_retired.load() || m_shutdown_done.load()) {
 		obs_log(LOG_WARNING, "OutputController [%s]: start ignored because endpoint is disabled",
 		        m_endpoint.name.c_str());
 		return false;
