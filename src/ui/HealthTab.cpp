@@ -236,8 +236,10 @@ void HealthTableModel::refresh()
 			if (old_snap->reconnect_count != new_snap->reconnect_count)
 				mark_changed(COL_RECONNECTS);
 
-			const bool old_uptime_shown = old_snap->state != OutputState::Idle;
-			const bool new_uptime_shown = new_snap->state != OutputState::Idle;
+			const bool old_uptime_shown =
+				old_snap->state == OutputState::Live || old_snap->state == OutputState::Reconnecting;
+			const bool new_uptime_shown =
+				new_snap->state == OutputState::Live || new_snap->state == OutputState::Reconnecting;
 			if (old_uptime_shown != new_uptime_shown ||
 			    (new_uptime_shown && old_snap->uptime_sec != new_snap->uptime_sec))
 				mark_changed(COL_UPTIME);
