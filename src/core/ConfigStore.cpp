@@ -18,7 +18,7 @@ GPLv2 — see LICENSE for full text.
 
 namespace smulti {
 
-static constexpr int CURRENT_SCHEMA_VERSION = 2;
+static constexpr int CURRENT_SCHEMA_VERSION = 3;
 static constexpr int SAVE_DEBOUNCE_MS       = 500;
 
 /* -----------------------------------------------------------------------
@@ -319,9 +319,9 @@ void ConfigStore::migrate(int from_version, std::vector<Endpoint> &/*endpoints*/
 {
 	obs_log(LOG_INFO, "ConfigStore: migrating config from schema v%d to v%d",
 	        from_version, CURRENT_SCHEMA_VERSION);
-	/* Endpoint::deserialize() supplies compatibility defaults for v1:
-	 * H.264 + custom video/audio settings, and preserves orientation numeric
-	 * values (1 is now the explicit vertical stretch mode). */
+	/* Endpoint::deserialize() supplies compatibility defaults for v1/v2.
+	 * v3 adds protected stream-key storage on Windows; old plaintext keys
+	 * are read normally and migrate on the next successful save. */
 }
 
 } // namespace smulti
