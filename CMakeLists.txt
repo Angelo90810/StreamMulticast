@@ -87,6 +87,7 @@ target_sources(
     src/core/ObsServiceImport.cpp
     src/core/TikTokBridgeImport.cpp
     src/core/HubConfig.cpp
+    src/core/IngestUrl.cpp
 
     # Connected-platform integrations
     src/integrations/FacebookClient.cpp
@@ -139,4 +140,16 @@ if(BUILD_TESTING)
     target_link_libraries(StreamMulticastCoreTests PRIVATE Crypt32)
   endif()
   add_test(NAME StreamMulticastCoreTests COMMAND StreamMulticastCoreTests)
+
+  if(ENABLE_QT)
+    add_executable(
+      StreamMulticastHubTests
+      tests/HubTests.cpp
+      src/core/IngestUrl.cpp
+    )
+    target_compile_features(StreamMulticastHubTests PRIVATE cxx_std_17)
+    target_include_directories(StreamMulticastHubTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(StreamMulticastHubTests PRIVATE Qt6::Core)
+    add_test(NAME StreamMulticastHubTests COMMAND StreamMulticastHubTests)
+  endif()
 endif()

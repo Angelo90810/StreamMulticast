@@ -6,6 +6,7 @@ GPLv2 — see LICENSE for full text.
 
 #include "HubTab.hpp"
 #include "../core/ObsServiceImport.hpp"
+#include "../core/IngestUrl.hpp"
 
 #include <QDesktopServices>
 #include <QFormLayout>
@@ -528,24 +529,15 @@ void HubTab::publish_facebook()
 
 void HubTab::upsert_facebook_endpoint(const QString &secure_url)
 {
-	QUrl parsed(secure_url);
-	QString path = parsed.path();
-	const int slash = path.lastIndexOf('/');
-	if (!parsed.isValid() || slash < 0 || slash == path.size() - 1) {
+	const SplitIngestUrl split =
+		split_rtmp_ingest_url(secure_url.toStdString());
+	if (!split.ok) {
 		on_facebook_error(tr("Facebook returned an ingest URL that could not be split into server + stream key."));
 		return;
 	}
 
-	QString key = path.mid(slash + 1);
-	const QString encoded_query = parsed.query(QUrl::FullyEncoded);
-	if (!encoded_query.isEmpty())
-		key += QStringLiteral("?") + encoded_query;
-
-	path = path.left(slash + 1);
-	parsed.setPath(path);
-	parsed.setQuery(QString());
-	parsed.setFragment(QString());
-	const QString server = parsed.toString();
+	const QString server = QString::fromStdString(split.server_url);
+	const QString key = QString::fromStdString(split.stream_key);
 
 	auto endpoints = m_registry.all();
 	for (const auto &ep : endpoints) {
