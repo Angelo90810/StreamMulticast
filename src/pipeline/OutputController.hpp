@@ -176,6 +176,10 @@ public:
 	void unblock_start();
 	bool start_blocked() const { return m_start_blocked.load(); }
 
+	/** Update the non-structural enabled flag without rebuilding the RTMP graph. */
+	void set_enabled(bool enabled) { m_enabled.store(enabled); }
+	bool enabled() const { return m_enabled.load(); }
+
 	/** Registry handoff helpers: expose Stopping while the previous live
 	 * controller is being reaped, then reopen starts once teardown is done. */
 	void begin_handoff_wait();
@@ -317,6 +321,7 @@ private:
 	std::atomic<bool>   m_stop_reconnect {false};
 	std::atomic<bool>   m_retired {false};
 	std::atomic<bool>   m_start_blocked {false};
+	std::atomic<bool>   m_enabled {true};
 
 	/** Guards shutdown_blocking() idempotency — set once, never reset. */
 	std::atomic<bool>   m_shutdown_done {false};
