@@ -65,6 +65,11 @@ TikTokBridgeConfig import_tiktok_bridge_file(const std::string &path)
 		cfg.error_message = "TikTok Bridge JSON is missing server_url/server";
 		return cfg;
 	}
+	if (cfg.server_url.rfind("rtmp://", 0) != 0 &&
+	    cfg.server_url.rfind("rtmps://", 0) != 0) {
+		cfg.error_message = "TikTok Bridge server URL must use rtmp:// or rtmps://";
+		return cfg;
+	}
 	if (cfg.stream_key.empty()) {
 		cfg.error_message = "TikTok Bridge JSON is missing stream_key/key";
 		return cfg;
