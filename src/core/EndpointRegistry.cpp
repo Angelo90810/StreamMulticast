@@ -170,7 +170,6 @@ void EndpointRegistry::add(Endpoint ep)
 void EndpointRegistry::update(const Endpoint &ep)
 {
 	bool controller_changed = false;
-	bool old_was_active = false;
 	bool old_needs_handoff = false;
 	bool disable_existing = false;
 	std::shared_ptr<OutputController> old_ctrl;
@@ -202,7 +201,6 @@ void EndpointRegistry::update(const Endpoint &ep)
 			 * stream. */
 			ctrl_it->second->set_enabled(ep.enabled);
 		} else {
-			old_was_active = ctrl_it->second->has_active_session();
 			old_needs_handoff = ctrl_it->second->has_session_resources() ||
 			                    ctrl_it->second->start_blocked();
 			old_ctrl = std::move(ctrl_it->second);
