@@ -120,7 +120,7 @@ ObsServiceConfig import_from_active_obs_profile()
 
 	/* Load service.json from the exact active profile directory. */
 	std::string serviceJson = profile_path + "/service.json";
-	obs_data_t *data = obs_data_create_from_json_file(serviceJson.c_str());
+	obs_data_t *data = obs_data_create_from_json_file_safe(serviceJson.c_str(), "bak");
 	if (!data) {
 		cfg.error_message = "service.json not found or invalid in the active OBS profile";
 		return cfg;
