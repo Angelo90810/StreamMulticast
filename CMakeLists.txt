@@ -90,6 +90,7 @@ target_sources(
 
     # Connected-platform integrations
     src/integrations/FacebookClient.cpp
+    src/integrations/YouTubeClient.cpp
 
     # Pipeline layer
     src/pipeline/EncoderFactory.cpp

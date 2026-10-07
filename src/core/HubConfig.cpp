@@ -91,6 +91,12 @@ bool HubConfig::load()
 		privacy = static_cast<int>(BroadcastPrivacy::Public);
 	m_state.plan.privacy = static_cast<BroadcastPrivacy>(privacy);
 
+	m_state.youtube_client_id = obs_data_get_string(root, "youtube_client_id");
+	m_state.youtube_refresh_token = get_protected(root, "youtube_refresh_token");
+	m_state.youtube_channel_id = obs_data_get_string(root, "youtube_channel_id");
+	m_state.youtube_channel_name = obs_data_get_string(root, "youtube_channel_name");
+	m_state.youtube_broadcast_id = obs_data_get_string(root, "youtube_broadcast_id");
+
 	m_state.meta_app_id = obs_data_get_string(root, "meta_app_id");
 	m_state.meta_client_token = get_protected(root, "meta_client_token");
 	m_state.facebook_user_token = get_protected(root, "facebook_user_token");
@@ -110,11 +116,17 @@ bool HubConfig::save(const HubState &state)
 		return false;
 
 	obs_data_t *root = obs_data_create();
-	obs_data_set_int(root, "schema_version", 1);
+	obs_data_set_int(root, "schema_version", 2);
 	obs_data_set_string(root, "title", state.plan.title.c_str());
 	obs_data_set_string(root, "description", state.plan.description.c_str());
 	obs_data_set_string(root, "scheduled_start_utc", state.plan.scheduled_start_utc.c_str());
 	obs_data_set_int(root, "privacy", static_cast<long long>(state.plan.privacy));
+
+	obs_data_set_string(root, "youtube_client_id", state.youtube_client_id.c_str());
+	set_protected(root, "youtube_refresh_token", state.youtube_refresh_token);
+	obs_data_set_string(root, "youtube_channel_id", state.youtube_channel_id.c_str());
+	obs_data_set_string(root, "youtube_channel_name", state.youtube_channel_name.c_str());
+	obs_data_set_string(root, "youtube_broadcast_id", state.youtube_broadcast_id.c_str());
 
 	obs_data_set_string(root, "meta_app_id", state.meta_app_id.c_str());
 	set_protected(root, "meta_client_token", state.meta_client_token);

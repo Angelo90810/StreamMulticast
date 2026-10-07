@@ -22,11 +22,25 @@ namespace smulti {
 HubTab::HubTab(EndpointRegistry &registry, QWidget *parent)
 	: QWidget(parent)
 	, m_registry(registry)
+	, m_youtube(this)
 	, m_facebook(this)
 {
 	m_config.load();
 	setup_ui();
 	load_state();
+
+	connect(&m_youtube, &YouTubeClient::authorization_url_ready,
+	        this, [](const QUrl &url) { QDesktopServices::openUrl(url); });
+	connect(&m_youtube, &YouTubeClient::authenticated,
+	        this, &HubTab::on_youtube_authenticated);
+	connect(&m_youtube, &YouTubeClient::access_token_refreshed,
+	        this, &HubTab::on_youtube_access_refreshed);
+	connect(&m_youtube, &YouTubeClient::channel_ready,
+	        this, &HubTab::on_youtube_channel);
+	connect(&m_youtube, &YouTubeClient::broadcast_prepared,
+	        this, &HubTab::on_youtube_broadcast_prepared);
+	connect(&m_youtube, &YouTubeClient::error,
+	        this, &HubTab::on_youtube_error);
 
 	connect(&m_facebook, &FacebookClient::device_code_ready,
 	        this, &HubTab::on_facebook_device_code);
@@ -45,8 +59,16 @@ HubTab::HubTab(EndpointRegistry &registry, QWidget *parent)
 
 	refresh_youtube();
 
-	if (!m_config.state().facebook_user_token.empty())
-		m_facebook.fetch_pages(QString::fromStdString(m_config.state().facebook_user_token));
+	const HubState &state = m_config.state();
+	if (!state.youtube_client_id.empty() && !state.youtube_refresh_token.empty()) {
+		m_youtube_status->setText(tr("Refreshing saved YouTube authorization..."));
+		m_youtube.refresh_access_token(
+			QString::fromStdString(state.youtube_client_id),
+			QString::fromStdString(state.youtube_refresh_token));
+	}
+
+	if (!state.facebook_user_token.empty())
+		m_facebook.fetch_pages(QString::fromStdString(state.facebook_user_token));
 }
 
 void HubTab::setup_ui()
@@ -61,7 +83,7 @@ void HubTab::setup_ui()
 	m_title_edit = new QLineEdit(this);
 	m_description_edit = new QPlainTextEdit(this);
 	m_description_edit->setMaximumHeight(90);
-	m_schedule_edit = new QDateTimeEdit(QDateTime::currentDateTime(), this);
+	m_schedule_edit = new QDateTimeEdit(QDateTime::currentDateTime().addSecs(300), this);
 	m_schedule_edit->setCalendarPopup(true);
 	m_schedule_edit->setDisplayFormat(QStringLiteral("dd/MM/yyyy HH:mm"));
 
@@ -75,19 +97,39 @@ void HubTab::setup_ui()
 	plan_form->addRow(tr("Scheduled start:"), m_schedule_edit);
 	plan_form->addRow(tr("Privacy:"), m_privacy_combo);
 
+	auto *plan_buttons = new QHBoxLayout();
 	auto *save_btn = new QPushButton(tr("Save broadcast plan"), this);
-	plan_form->addRow(QString(), save_btn);
+	m_prepare_all_btn = new QPushButton(tr("Prepare YouTube + Facebook"), this);
+	plan_buttons->addWidget(save_btn);
+	plan_buttons->addWidget(m_prepare_all_btn);
+	plan_form->addRow(QString(), plan_buttons);
 	connect(save_btn, &QPushButton::clicked, this, &HubTab::save_plan);
+	connect(m_prepare_all_btn, &QPushButton::clicked,
+	        this, &HubTab::prepare_connected_destinations);
 	outer->addWidget(plan_group);
 
-	auto *youtube_group = new QGroupBox(tr("YouTube — OBS native"), this);
-	auto *youtube_layout = new QVBoxLayout(youtube_group);
+	auto *youtube_group = new QGroupBox(tr("YouTube — OBS native video + Hub metadata"), this);
+	auto *youtube_form = new QFormLayout(youtube_group);
+	m_google_client_id = new QLineEdit(this);
+	m_google_client_id->setPlaceholderText(tr("Desktop OAuth Client ID (*.apps.googleusercontent.com)"));
+	auto *youtube_connect = new QPushButton(tr("Connect YouTube"), this);
+	auto *youtube_refresh = new QPushButton(tr("Refresh OBS YouTube status"), this);
+	m_prepare_youtube_btn = new QPushButton(tr("Prepare YouTube event"), this);
 	m_youtube_status = new QLabel(this);
 	m_youtube_status->setWordWrap(true);
-	auto *youtube_refresh = new QPushButton(tr("Refresh OBS YouTube status"), this);
-	youtube_layout->addWidget(m_youtube_status);
-	youtube_layout->addWidget(youtube_refresh);
+
+	auto *youtube_buttons = new QHBoxLayout();
+	youtube_buttons->addWidget(youtube_connect);
+	youtube_buttons->addWidget(youtube_refresh);
+	youtube_buttons->addWidget(m_prepare_youtube_btn);
+
+	youtube_form->addRow(tr("Google Client ID:"), m_google_client_id);
+	youtube_form->addRow(QString(), youtube_buttons);
+	youtube_form->addRow(QString(), m_youtube_status);
+
+	connect(youtube_connect, &QPushButton::clicked, this, &HubTab::connect_youtube);
 	connect(youtube_refresh, &QPushButton::clicked, this, &HubTab::refresh_youtube);
+	connect(m_prepare_youtube_btn, &QPushButton::clicked, this, &HubTab::prepare_youtube);
 	outer->addWidget(youtube_group);
 
 	auto *facebook_group = new QGroupBox(tr("Facebook — connected Page"), this);
@@ -158,6 +200,11 @@ void HubTab::load_state()
 		}
 	}
 
+	m_google_client_id->setText(QString::fromStdString(state.youtube_client_id));
+	if (!state.youtube_channel_name.empty())
+		m_youtube_status->setText(
+			tr("Saved channel: %1").arg(QString::fromStdString(state.youtube_channel_name)));
+
 	m_meta_app_id->setText(QString::fromStdString(state.meta_app_id));
 	m_meta_client_token->setText(QString::fromStdString(state.meta_client_token));
 
@@ -183,6 +230,7 @@ void HubTab::save_state()
 {
 	HubState state = m_config.state();
 	state.plan = collect_plan();
+	state.youtube_client_id = m_google_client_id->text().trimmed().toStdString();
 	state.meta_app_id = m_meta_app_id->text().trimmed().toStdString();
 	state.meta_client_token = m_meta_client_token->text().toStdString();
 	m_config.save(state);
@@ -191,25 +239,184 @@ void HubTab::save_state()
 void HubTab::save_plan()
 {
 	save_state();
+	m_youtube_status->setText(tr("Broadcast plan saved."));
 	m_facebook_status->setText(tr("Broadcast plan saved."));
+}
+
+bool HubTab::youtube_native_config(std::string &stream_key, QString &service_name) const
+{
+	const ObsServiceConfig cfg = import_from_active_obs_profile();
+	service_name = QString::fromStdString(cfg.service_name);
+	if (!cfg.ok || !service_name.contains(QStringLiteral("YouTube"), Qt::CaseInsensitive))
+		return false;
+
+	stream_key = cfg.stream_key;
+	return !stream_key.empty();
 }
 
 void HubTab::refresh_youtube()
 {
-	const ObsServiceConfig cfg = import_from_active_obs_profile();
-	const QString service = QString::fromStdString(cfg.service_name);
-
-	if (cfg.ok && service.contains(QStringLiteral("YouTube"), Qt::CaseInsensitive)) {
+	std::string key;
+	QString service;
+	if (youtube_native_config(key, service)) {
+		const QString channel = QString::fromStdString(m_config.state().youtube_channel_name);
 		m_youtube_status->setText(
-			tr("✓ YouTube is the native OBS destination (%1). "
-			   "StreamMulticast will not create a duplicate YouTube endpoint.")
-				.arg(service));
+			channel.isEmpty()
+				? tr("✓ YouTube is the native OBS destination (%1). Connect the Hub account to manage events.")
+					.arg(service)
+				: tr("✓ OBS native: %1 | Hub channel: %2. No duplicate YouTube output will be created.")
+					.arg(service, channel));
 		m_youtube_status->setStyleSheet(QStringLiteral("color: #2ecc71;"));
 	} else {
 		m_youtube_status->setText(
 			tr("YouTube is not currently detected as the native OBS destination. "
 			   "Configure YouTube in OBS Settings → Stream."));
 		m_youtube_status->setStyleSheet(QStringLiteral("color: #f39c12;"));
+	}
+}
+
+void HubTab::connect_youtube()
+{
+	save_state();
+	if (m_google_client_id->text().trimmed().isEmpty()) {
+		QMessageBox::warning(
+			this, tr("Broadcast Hub"),
+			tr("Enter a Google Desktop OAuth Client ID first."));
+		return;
+	}
+
+	m_youtube_status->setStyleSheet(QString());
+	m_youtube_status->setText(
+		tr("Opening Google authorization. The callback returns only to this PC (127.0.0.1)."));
+	m_youtube.start_oauth(m_google_client_id->text());
+}
+
+void HubTab::on_youtube_authenticated(const QString &access_token,
+                                      const QString &refresh_token)
+{
+	m_youtube_access_token = access_token;
+
+	HubState state = m_config.state();
+	if (!refresh_token.isEmpty())
+		state.youtube_refresh_token = refresh_token.toStdString();
+	state.youtube_client_id = m_google_client_id->text().trimmed().toStdString();
+	m_config.save(state);
+
+	m_youtube_status->setText(tr("✓ YouTube authorized. Loading channel..."));
+	m_youtube.fetch_channel(access_token);
+}
+
+void HubTab::on_youtube_access_refreshed(const QString &access_token)
+{
+	m_youtube_access_token = access_token;
+	m_youtube_status->setText(tr("✓ YouTube authorization restored. Loading channel..."));
+	m_youtube.fetch_channel(access_token);
+}
+
+void HubTab::on_youtube_channel(const QString &id, const QString &name)
+{
+	HubState state = m_config.state();
+	state.youtube_channel_id = id.toStdString();
+	state.youtube_channel_name = name.toStdString();
+	m_config.save(state);
+
+	m_youtube_status->setStyleSheet(QStringLiteral("color: #2ecc71;"));
+	refresh_youtube();
+}
+
+void HubTab::prepare_youtube()
+{
+	save_state();
+
+	if (m_youtube_access_token.isEmpty()) {
+		QMessageBox::warning(
+			this, tr("Broadcast Hub"),
+			tr("Connect YouTube in the Hub first."));
+		return;
+	}
+
+	std::string stream_key;
+	QString service;
+	if (!youtube_native_config(stream_key, service)) {
+		QMessageBox::warning(
+			this, tr("Broadcast Hub"),
+			tr("YouTube must be configured as the native OBS streaming service first."));
+		return;
+	}
+
+	const HubState &state = m_config.state();
+	if (state.plan.title.empty()) {
+		QMessageBox::warning(
+			this, tr("Broadcast Hub"),
+			tr("Enter a broadcast title first."));
+		return;
+	}
+
+	m_youtube_status->setStyleSheet(QString());
+	m_youtube_status->setText(
+		tr("Finding the reusable YouTube stream already configured in OBS..."));
+	m_youtube.prepare_native_obs_broadcast(
+		m_youtube_access_token,
+		QString::fromStdString(stream_key),
+		state.plan);
+}
+
+void HubTab::on_youtube_broadcast_prepared(const QString &broadcast_id,
+                                           const QString &stream_id)
+{
+	HubState state = m_config.state();
+	state.youtube_broadcast_id = broadcast_id.toStdString();
+	m_config.save(state);
+
+	m_youtube_status->setStyleSheet(QStringLiteral("color: #2ecc71;"));
+	m_youtube_status->setText(
+		tr("✓ YouTube event prepared and bound to the OBS-native stream. "
+		   "Auto-start/auto-stop are enabled. Broadcast ID: %1 | Stream: %2")
+			.arg(broadcast_id, stream_id));
+}
+
+void HubTab::on_youtube_error(const QString &message)
+{
+	m_youtube_status->setText(tr("YouTube error: %1").arg(message));
+	m_youtube_status->setStyleSheet(QStringLiteral("color: #e74c3c;"));
+}
+
+void HubTab::prepare_connected_destinations()
+{
+	save_state();
+	if (m_config.state().plan.title.empty()) {
+		QMessageBox::warning(this, tr("Broadcast Hub"), tr("Enter a broadcast title first."));
+		return;
+	}
+
+	bool attempted = false;
+	if (!m_youtube_access_token.isEmpty()) {
+		std::string stream_key;
+		QString service;
+		if (youtube_native_config(stream_key, service)) {
+			attempted = true;
+			m_youtube_status->setText(tr("Preparing YouTube..."));
+			m_youtube.prepare_native_obs_broadcast(
+				m_youtube_access_token,
+				QString::fromStdString(stream_key),
+				m_config.state().plan);
+		}
+	}
+
+	const HubState &state = m_config.state();
+	if (!state.facebook_page_id.empty() && !state.facebook_page_token.empty()) {
+		attempted = true;
+		m_facebook_status->setText(tr("Preparing Facebook..."));
+		m_facebook.create_live(
+			QString::fromStdString(state.facebook_page_id),
+			QString::fromStdString(state.facebook_page_token),
+			state.plan);
+	}
+
+	if (!attempted) {
+		QMessageBox::information(
+			this, tr("Broadcast Hub"),
+			tr("Connect YouTube and/or Facebook before preparing destinations."));
 	}
 }
 

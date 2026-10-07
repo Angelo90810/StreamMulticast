@@ -26,6 +26,16 @@ struct BroadcastPlan {
 struct HubState {
 	BroadcastPlan plan;
 
+	/* YouTube control-plane credentials/state.
+	 * The video path remains OBS-native; this token is used only to manage
+	 * broadcasts and bind them to the reusable stream key already in OBS. */
+	std::string youtube_client_id;
+	std::string youtube_refresh_token;
+	std::string youtube_channel_id;
+	std::string youtube_channel_name;
+	std::string youtube_broadcast_id;
+
+	/* Facebook control-plane credentials/state. */
 	std::string meta_app_id;
 	std::string meta_client_token;
 	std::string facebook_user_token;
