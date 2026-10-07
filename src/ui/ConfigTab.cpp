@@ -189,6 +189,17 @@ void ConfigTab::setup_ui()
 	outer_layout->setContentsMargins(4, 4, 4, 4);
 	outer_layout->setSpacing(4);
 
+	m_empty_label = new QLabel(this);
+	m_empty_label->setAlignment(Qt::AlignCenter);
+	m_empty_label->setWordWrap(true);
+	m_empty_label->setMinimumSize(0, 0);
+	m_empty_label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+	m_empty_label->setText(
+		tr("No endpoints configured yet.\n\n"
+		   "Add Instagram or another manual RTMP destination below.\n"
+		   "Facebook (Hub) will be created automatically when a Facebook Live is prepared."));
+	outer_layout->addWidget(m_empty_label, 1);
+
 	m_list = new QListWidget(this);
 	m_list->setMinimumSize(0, 0);
 	m_list->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
@@ -214,7 +225,13 @@ void ConfigTab::rebuild_list()
 {
 	m_list->clear();
 
-	for (const auto &ep : m_registry.all()) {
+	const auto endpoints = m_registry.all();
+	const bool empty = endpoints.empty();
+	m_empty_label->setVisible(empty);
+	m_list->setVisible(!empty);
+	m_add_btn->setText(empty ? tr("+ Add First Endpoint") : tr("+ Add Endpoint"));
+
+	for (const auto &ep : endpoints) {
 		auto *card = new EndpointCard(ep, nullptr);
 		auto *item = new QListWidgetItem();
 		item->setSizeHint(card->sizeHint());
