@@ -171,6 +171,7 @@ void EndpointRegistry::update(const Endpoint &ep)
 {
 	bool controller_changed = false;
 	bool old_needs_handoff = false;
+	bool old_was_active = false;
 	bool disable_existing = false;
 	std::shared_ptr<OutputController> old_ctrl;
 	std::shared_ptr<OutputController> replacement;
@@ -208,6 +209,7 @@ void EndpointRegistry::update(const Endpoint &ep)
 			if (previous.linked_to_main && !ep.linked_to_main)
 				ctrl_it->second->cancel_start_request();
 		} else {
+			old_was_active = ctrl_it->second->has_active_session();
 			old_needs_handoff = ctrl_it->second->has_session_resources() ||
 			                    ctrl_it->second->start_blocked();
 			old_ctrl = std::move(ctrl_it->second);
@@ -215,6 +217,14 @@ void EndpointRegistry::update(const Endpoint &ep)
 			replacement = std::make_shared<OutputController>(ep, m_reaper);
 			if (old_needs_handoff)
 				replacement->begin_handoff_wait();
+
+			/* Preserve runtime intent inside the pipeline itself. A live
+			 * endpoint edited while streaming must come back after the old
+			 * output is fully reaped even if the Configure dock is closed
+			 * or failed to register. */
+			if (old_was_active)
+				replacement->request_start_when_ready();
+
 			ctrl_it->second = replacement;
 		}
 	}
