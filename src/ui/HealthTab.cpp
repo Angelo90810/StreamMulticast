@@ -10,6 +10,7 @@ GPLv2 — see LICENSE for full text.
 
 #include <QVBoxLayout>
 #include <QHeaderView>
+#include <QSizePolicy>
 #include <QColor>
 #include <QDesktopServices>
 #include <QUrl>
@@ -280,6 +281,9 @@ HealthTab::HealthTab(EndpointRegistry &registry,
 
 void HealthTab::setup_ui()
 {
+	setMinimumSize(0, 0);
+	setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+
 	auto *layout = new QVBoxLayout(this);
 	layout->setContentsMargins(4, 4, 4, 4);
 	layout->setSpacing(4);
@@ -287,6 +291,10 @@ void HealthTab::setup_ui()
 	/* Live-grid table */
 	m_model = new HealthTableModel(m_registry, m_sampler, this);
 	m_table = new QTableView(this);
+	m_table->setMinimumSize(0, 0);
+	m_table->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+	m_table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+	m_table->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
 	m_table->setModel(m_model);
 	m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
 	m_table->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -302,6 +310,9 @@ void HealthTab::setup_ui()
 	 * Avanatro credit linking to the homepage.
 	 * Plausible tracking via UTM param in the URLs. */
 	m_footer = new QLabel(this);
+	m_footer->setMinimumWidth(0);
+	m_footer->setWordWrap(true);
+	m_footer->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 	m_footer->setOpenExternalLinks(true);
 	m_footer->setAlignment(Qt::AlignCenter);
 	m_footer->setText(
