@@ -424,9 +424,11 @@ bool OutputController::start()
 {
 	std::lock_guard<std::mutex> lifecycle_lock(m_lifecycle_mutex);
 
-	if (!m_endpoint.enabled || m_retired.load() || m_shutdown_done.load()) {
+	if (!m_endpoint.enabled || m_start_blocked.load() ||
+	    m_retired.load() || m_shutdown_done.load()) {
 		const char *reason = !m_endpoint.enabled ? "endpoint disabled"
-			: (m_retired.load() ? "controller retired" : "controller shutting down");
+			: (m_start_blocked.load() ? "waiting for previous teardown"
+			: (m_retired.load() ? "controller retired" : "controller shutting down"));
 		obs_log(LOG_WARNING, "OutputController [%s]: start ignored (%s)",
 		        m_endpoint.name.c_str(), reason);
 		return false;
