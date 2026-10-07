@@ -103,7 +103,9 @@ private:
 	 * has no OutputController at all (disabled endpoint, M3), or it already
 	 * obtained `state`/`last_error` through OutputController's locked getters.
 	 */
-	void write_inactive_snapshot(const Endpoint &ep, const std::string &last_error, OutputState state);
+	void write_inactive_snapshot(const Endpoint &ep, const std::string &last_error,
+	                             OutputState state, int target_bitrate = -1,
+	                             int reconnect_count = 0);
 
 	EndpointRegistry &m_registry;
 
