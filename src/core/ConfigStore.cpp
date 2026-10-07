@@ -102,13 +102,14 @@ bool ConfigStore::load()
  * ----------------------------------------------------------------------- */
 bool ConfigStore::save(const std::vector<Endpoint> &endpoints)
 {
-	/* Invalidate every background snapshot captured before this synchronous
-	 * save. Without a generation, a worker that had already copied an older
-	 * pending endpoint list could acquire m_mutex AFTER this function and
-	 * overwrite the final unload save with stale data. */
-	const uint64_t generation = m_save_generation.fetch_add(1) + 1;
+	/* Serialize generation assignment with the pending snapshot itself.
+	 * Incrementing the atomic before taking m_pending_mutex allowed two
+	 * concurrent callers to acquire the mutex in reverse order and publish
+	 * an older generation AFTER a newer one. */
+	uint64_t generation = 0;
 	{
 		std::lock_guard<std::mutex> pending_lock(m_pending_mutex);
+		generation = m_save_generation.fetch_add(1) + 1;
 		m_pending_endpoints = endpoints;
 		m_pending_generation = generation;
 		m_save_pending.store(false);
@@ -133,8 +134,8 @@ bool ConfigStore::save(const std::vector<Endpoint> &endpoints)
  * ----------------------------------------------------------------------- */
 void ConfigStore::schedule_save(const std::vector<Endpoint> &endpoints)
 {
-	const uint64_t generation = m_save_generation.fetch_add(1) + 1;
 	std::lock_guard<std::mutex> lock(m_pending_mutex);
+	const uint64_t generation = m_save_generation.fetch_add(1) + 1;
 	m_pending_endpoints   = endpoints;
 	m_pending_generation  = generation;
 	m_last_change_request = std::chrono::steady_clock::now();
