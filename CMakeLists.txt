@@ -4,6 +4,8 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCO
 
 project(${_name} VERSION ${_version})
 
+include(CTest)
+
 # StreamMulticast requires both frontend-api and Qt
 option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" ON)
 option(ENABLE_QT "Use Qt functionality" ON)
@@ -108,3 +110,19 @@ install(
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
+
+if(BUILD_TESTING)
+  add_executable(
+    StreamMulticastCoreTests
+    tests/CoreTests.cpp
+    src/core/Endpoint.cpp
+    src/core/SecretStore.cpp
+  )
+  target_compile_features(StreamMulticastCoreTests PRIVATE cxx_std_17)
+  target_include_directories(StreamMulticastCoreTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(StreamMulticastCoreTests PRIVATE OBS::libobs)
+  if(WIN32)
+    target_link_libraries(StreamMulticastCoreTests PRIVATE Crypt32)
+  endif()
+  add_test(NAME StreamMulticastCoreTests COMMAND StreamMulticastCoreTests)
+endif()
