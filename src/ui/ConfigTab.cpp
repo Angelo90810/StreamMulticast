@@ -11,6 +11,8 @@ GPLv2 — see LICENSE for full text.
 
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QGridLayout>
+#include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QListWidgetItem>
 #include <QtCore/QMetaObject>
@@ -27,38 +29,47 @@ EndpointCard::EndpointCard(const Endpoint &ep, QWidget *parent)
 
 void EndpointCard::setup_ui()
 {
-	auto *layout = new QHBoxLayout(this);
-	layout->setContentsMargins(8, 6, 8, 6);
-	layout->setSpacing(8);
+	setMinimumSize(0, 0);
+	setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+
+	auto *layout = new QGridLayout(this);
+	layout->setContentsMargins(6, 5, 6, 5);
+	layout->setHorizontalSpacing(6);
+	layout->setVerticalSpacing(4);
+	layout->setColumnStretch(1, 1);
 
 	m_status_led = new QLabel(this);
 	m_status_led->setFixedSize(14, 14);
-	layout->addWidget(m_status_led);
+	layout->addWidget(m_status_led, 0, 0);
 
 	m_name_label = new QLabel(this);
-	m_name_label->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-	layout->addWidget(m_name_label, 1);
+	m_name_label->setWordWrap(true);
+	m_name_label->setMinimumWidth(0);
+	m_name_label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+	layout->addWidget(m_name_label, 0, 1);
 
 	m_enabled_cb = new QCheckBox(tr("On"), this);
-	layout->addWidget(m_enabled_cb);
+	layout->addWidget(m_enabled_cb, 0, 2);
+
+	auto flexible_button = [](QPushButton *button) {
+		button->setMinimumWidth(0);
+		button->setMinimumHeight(26);
+		button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+	};
 
 	m_start_stop_btn = new QPushButton(tr("Start"), this);
-	m_start_stop_btn->setMinimumWidth(72);
-	m_start_stop_btn->setMinimumHeight(28);
+	flexible_button(m_start_stop_btn);
 	m_start_stop_btn->setToolTip(tr("Start or stop this endpoint independently"));
-	layout->addWidget(m_start_stop_btn);
 
 	m_edit_btn = new QPushButton(tr("Edit"), this);
-	m_edit_btn->setMinimumWidth(72);
-	m_edit_btn->setMinimumHeight(28);
-	layout->addWidget(m_edit_btn);
+	flexible_button(m_edit_btn);
 
 	m_delete_btn = new QPushButton(tr("Delete"), this);
-	m_delete_btn->setMinimumWidth(72);
-	m_delete_btn->setMinimumHeight(28);
-	layout->addWidget(m_delete_btn);
+	flexible_button(m_delete_btn);
 
-	setMinimumHeight(44);
+	layout->addWidget(m_start_stop_btn, 1, 0);
+	layout->addWidget(m_edit_btn, 1, 1);
+	layout->addWidget(m_delete_btn, 1, 2);
 
 	connect(m_edit_btn, &QPushButton::clicked, this, [this]() {
 		emit editRequested(m_id);
@@ -171,11 +182,17 @@ ConfigTab::~ConfigTab()
 
 void ConfigTab::setup_ui()
 {
+	setMinimumSize(0, 0);
+	setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+
 	auto *outer_layout = new QVBoxLayout(this);
 	outer_layout->setContentsMargins(4, 4, 4, 4);
 	outer_layout->setSpacing(4);
 
 	m_list = new QListWidget(this);
+	m_list->setMinimumSize(0, 0);
+	m_list->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+	m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 	m_list->setDragDropMode(QAbstractItemView::InternalMove);
 	m_list->setDefaultDropAction(Qt::MoveAction);
 	m_list->setSelectionMode(QAbstractItemView::NoSelection);
@@ -183,6 +200,8 @@ void ConfigTab::setup_ui()
 	outer_layout->addWidget(m_list, 1);
 
 	m_add_btn = new QPushButton(tr("+ Add Endpoint"), this);
+	m_add_btn->setMinimumWidth(0);
+	m_add_btn->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 	outer_layout->addWidget(m_add_btn);
 
 	connect(m_add_btn, &QPushButton::clicked, this, &ConfigTab::on_add_endpoint);
