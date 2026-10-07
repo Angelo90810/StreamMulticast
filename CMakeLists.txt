@@ -71,6 +71,7 @@ target_sources(
 
     # Core layer
     src/core/Endpoint.cpp
+    src/core/SecretStore.cpp
     src/core/ConfigStore.cpp
     src/core/EndpointRegistry.cpp
     src/core/ObsServiceImport.cpp
@@ -95,6 +96,10 @@ target_include_directories(
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
+
+if(WIN32)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Crypt32)
+endif()
 
 # Install locale data
 install(
