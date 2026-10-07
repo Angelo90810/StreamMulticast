@@ -17,6 +17,7 @@ GPLv2 — see LICENSE for full text.
 #include <QUrl>
 #include <QVariantMap>
 #include <QVBoxLayout>
+#include <QSizePolicy>
 
 namespace smulti {
 
@@ -74,21 +75,43 @@ HubTab::HubTab(EndpointRegistry &registry, QWidget *parent)
 
 void HubTab::setup_ui()
 {
+	setMinimumSize(0, 0);
+	setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+
+	auto make_form_responsive = [](QFormLayout *form) {
+		form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+		form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+		form->setFormAlignment(Qt::AlignTop);
+		form->setLabelAlignment(Qt::AlignLeft);
+	};
+
+	auto make_flexible = [](QWidget *widget) {
+		if (!widget)
+			return;
+		widget->setMinimumWidth(0);
+		widget->setSizePolicy(QSizePolicy::Ignored, widget->sizePolicy().verticalPolicy());
+	};
+
 	auto *outer = new QVBoxLayout(this);
 	outer->setContentsMargins(8, 8, 8, 8);
 	outer->setSpacing(8);
 
 	auto *plan_group = new QGroupBox(tr("Broadcast"), this);
 	auto *plan_form = new QFormLayout(plan_group);
+	make_form_responsive(plan_form);
 
 	m_title_edit = new QLineEdit(this);
+	make_flexible(m_title_edit);
 	m_description_edit = new QPlainTextEdit(this);
+	make_flexible(m_description_edit);
 	m_description_edit->setMaximumHeight(90);
 	m_schedule_edit = new QDateTimeEdit(QDateTime::currentDateTime().addSecs(300), this);
+	make_flexible(m_schedule_edit);
 	m_schedule_edit->setCalendarPopup(true);
 	m_schedule_edit->setDisplayFormat(QStringLiteral("dd/MM/yyyy HH:mm"));
 
 	m_privacy_combo = new QComboBox(this);
+	make_flexible(m_privacy_combo);
 	m_privacy_combo->addItem(tr("Public"), static_cast<int>(BroadcastPrivacy::Public));
 	m_privacy_combo->addItem(tr("Unlisted"), static_cast<int>(BroadcastPrivacy::Unlisted));
 	m_privacy_combo->addItem(tr("Private"), static_cast<int>(BroadcastPrivacy::Private));
@@ -98,9 +121,11 @@ void HubTab::setup_ui()
 	plan_form->addRow(tr("Scheduled start:"), m_schedule_edit);
 	plan_form->addRow(tr("Privacy:"), m_privacy_combo);
 
-	auto *plan_buttons = new QHBoxLayout();
+	auto *plan_buttons = new QVBoxLayout();
 	auto *save_btn = new QPushButton(tr("Save broadcast plan"), this);
+	make_flexible(save_btn);
 	m_prepare_all_btn = new QPushButton(tr("Prepare YouTube + Facebook"), this);
+	make_flexible(m_prepare_all_btn);
 	plan_buttons->addWidget(save_btn);
 	plan_buttons->addWidget(m_prepare_all_btn);
 	plan_form->addRow(QString(), plan_buttons);
@@ -111,15 +136,20 @@ void HubTab::setup_ui()
 
 	auto *youtube_group = new QGroupBox(tr("YouTube — OBS native video + Hub metadata"), this);
 	auto *youtube_form = new QFormLayout(youtube_group);
+	make_form_responsive(youtube_form);
 	m_google_client_id = new QLineEdit(this);
+	make_flexible(m_google_client_id);
 	m_google_client_id->setPlaceholderText(tr("Desktop OAuth Client ID (*.apps.googleusercontent.com)"));
 	auto *youtube_connect = new QPushButton(tr("Connect YouTube"), this);
+	make_flexible(youtube_connect);
 	auto *youtube_refresh = new QPushButton(tr("Refresh OBS YouTube status"), this);
+	make_flexible(youtube_refresh);
 	m_prepare_youtube_btn = new QPushButton(tr("Prepare YouTube event"), this);
+	make_flexible(m_prepare_youtube_btn);
 	m_youtube_status = new QLabel(this);
 	m_youtube_status->setWordWrap(true);
 
-	auto *youtube_buttons = new QHBoxLayout();
+	auto *youtube_buttons = new QVBoxLayout();
 	youtube_buttons->addWidget(youtube_connect);
 	youtube_buttons->addWidget(youtube_refresh);
 	youtube_buttons->addWidget(m_prepare_youtube_btn);
@@ -135,19 +165,25 @@ void HubTab::setup_ui()
 
 	auto *facebook_group = new QGroupBox(tr("Facebook — connected Page"), this);
 	auto *facebook_form = new QFormLayout(facebook_group);
+	make_form_responsive(facebook_form);
 	m_meta_app_id = new QLineEdit(this);
+	make_flexible(m_meta_app_id);
 	m_meta_app_id->setPlaceholderText(tr("Meta App ID"));
 	m_meta_client_token = new QLineEdit(this);
+	make_flexible(m_meta_client_token);
 	m_meta_client_token->setEchoMode(QLineEdit::Password);
 	m_meta_client_token->setPlaceholderText(tr("Meta Client Token"));
 	auto *connect_btn = new QPushButton(tr("Connect Facebook"), this);
 	m_page_combo = new QComboBox(this);
+	make_flexible(m_page_combo);
 	m_facebook_status = new QLabel(this);
 	m_facebook_status->setWordWrap(true);
 
-	auto *facebook_buttons = new QHBoxLayout();
+	auto *facebook_buttons = new QVBoxLayout();
 	m_prepare_facebook_btn = new QPushButton(tr("Prepare Facebook Live"), this);
+	make_flexible(m_prepare_facebook_btn);
 	m_publish_facebook_btn = new QPushButton(tr("Publish Facebook Live"), this);
+	make_flexible(m_publish_facebook_btn);
 	facebook_buttons->addWidget(m_prepare_facebook_btn);
 	facebook_buttons->addWidget(m_publish_facebook_btn);
 
