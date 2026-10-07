@@ -23,11 +23,11 @@ namespace smulti {
 const std::vector<EndpointDialog::ServerTemplate> EndpointDialog::s_templates = {
 	{ QStringLiteral("Custom RTMP"), QStringLiteral("") },
 	{ QStringLiteral("Twitch"),      QStringLiteral("rtmp://live.twitch.tv/app") },
-	{ QStringLiteral("YouTube"),     QStringLiteral("rtmp://a.rtmp.youtube.com/live2") },
+	{ QStringLiteral("YouTube"),     QStringLiteral("rtmps://a.rtmps.youtube.com:443/live2") },
 	{ QStringLiteral("Facebook"),    QStringLiteral("rtmps://rtmp-api.facebook.com:443/rtmp/") },
 	{ QStringLiteral("TikTok"),      QStringLiteral("rtmp://push-rtmp.tiktokcdn.com/live") },
 	{ QStringLiteral("Kick"),        QStringLiteral("rtmp://ingest.global-contribute.live-video.net/app") },
-	{ QStringLiteral("Trovo"),       QStringLiteral("rtmp://livepush.trovo.live/push") },
+	{ QStringLiteral("Trovo"),       QStringLiteral("rtmp://livepush.trovo.live/live/") },
 };
 
 EndpointDialog::EndpointDialog(const Endpoint &ep,
