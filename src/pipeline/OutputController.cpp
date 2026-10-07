@@ -177,10 +177,16 @@ void OutputController::finish_handoff_wait()
 	if (m_retired.load() || m_shutdown_done.load())
 		return;
 
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		if (!m_output && m_state == OutputState::Stopping)
+			m_state = OutputState::Idle;
+	}
+
+	/* Publish the open gate only after state is ready, so a concurrent
+	 * frontend start can never observe unblocked + Stopping and miss its
+	 * only automatic start event. */
 	m_start_blocked.store(false);
-	std::lock_guard<std::mutex> lock(m_mutex);
-	if (!m_output && m_state == OutputState::Stopping)
-		m_state = OutputState::Idle;
 }
 
 std::string OutputController::last_error() const
@@ -970,10 +976,10 @@ void OutputController::handle_stop(int code)
 	m_stop_reconnect.store(false);
 
 	std::lock_guard<std::mutex> lock(m_mutex);
-	if (m_shutdown_done.load()) {
-		/* shutdown_blocking() started while we were joining the stale
-		 * thread above — abort, do not spawn a thread it would have to
-		 * race to join. */
+	if (m_retired.load() || m_shutdown_done.load()) {
+		/* Retirement/shutdown started while we were joining the stale
+		 * thread above — do not spawn reconnect work for a controller the
+		 * registry no longer owns. */
 		m_state = OutputState::Idle;
 		return;
 	}
