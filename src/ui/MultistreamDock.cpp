@@ -8,6 +8,7 @@ GPLv2 — see LICENSE for full text.
 #include "MultistreamDock.hpp"
 #include "HealthTab.hpp"
 #include "ConfigTab.hpp"
+#include "HubTab.hpp"
 
 #include <QVBoxLayout>
 #include <QTabWidget>
@@ -36,13 +37,15 @@ void MultistreamDock::setup_ui()
 	m_tabs = new QTabWidget(this);
 	m_tabs->setDocumentMode(false);
 
+	m_hub_tab = new HubTab(m_registry, m_tabs);
 	m_health_tab = new HealthTab(m_registry, m_sampler, m_tabs);
 	m_config_tab = new ConfigTab(m_registry, m_tabs);
 
+	m_tabs->addTab(m_hub_tab, tr("Hub"));
 	m_tabs->addTab(m_health_tab, tr("Health"));
 	m_tabs->addTab(m_config_tab, tr("Configure"));
 
-	/* Default to Health tab */
+	/* Broadcast Hub is the primary v2 workflow. */
 	m_tabs->setCurrentIndex(0);
 
 	layout->addWidget(m_tabs);

@@ -17,6 +17,7 @@ class EndpointRegistry;
 class HealthSampler;
 class HealthTab;
 class ConfigTab;
+class HubTab;
 
 /**
  * MultistreamDock — top-level Qt widget registered as an OBS dock.
@@ -50,6 +51,7 @@ private:
 	HealthSampler    &m_sampler;
 
 	QTabWidget *m_tabs      {nullptr};
+	HubTab     *m_hub_tab   {nullptr};
 	HealthTab  *m_health_tab{nullptr};
 	ConfigTab  *m_config_tab{nullptr};
 };

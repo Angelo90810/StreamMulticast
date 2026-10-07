@@ -41,8 +41,8 @@ if(ENABLE_FRONTEND_API)
 endif()
 
 if(ENABLE_QT)
-  find_package(Qt6 REQUIRED COMPONENTS Widgets Core Gui)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+  find_package(Qt6 REQUIRED COMPONENTS Widgets Core Gui Network)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
 
   # The obs-deps Qt6 ships with broken INTERFACE_INCLUDE_DIRECTORIES propagation
   # for some configurations. We hardcode the include search paths directly
@@ -86,6 +86,10 @@ target_sources(
     src/core/EndpointRegistry.cpp
     src/core/ObsServiceImport.cpp
     src/core/TikTokBridgeImport.cpp
+    src/core/HubConfig.cpp
+
+    # Connected-platform integrations
+    src/integrations/FacebookClient.cpp
 
     # Pipeline layer
     src/pipeline/EncoderFactory.cpp
@@ -98,6 +102,7 @@ target_sources(
     src/ui/HealthTab.cpp
     src/ui/ConfigTab.cpp
     src/ui/EndpointDialog.cpp
+    src/ui/HubTab.cpp
 )
 
 # Include directories

@@ -106,6 +106,19 @@ Building from source is **only** for contributors who want to modify the code �
 
 ---
 
+
+## Broadcast Hub (v2 development on main)
+
+The first v2 slice is now under development in the `Hub` tab:
+
+- **YouTube stays native in OBS** and is detected by the Hub; StreamMulticast never creates a duplicate YouTube output.
+- **Facebook uses the official Graph API flow**: device login, managed Page selection, Live creation, automatic ingest URL import into a `Facebook (Hub)` endpoint, then an explicit publish step after preview.
+- **Instagram stays manual** through Instagram Live Producer + the Instagram endpoint template.
+- Hub account and Page tokens are stored with Windows DPAPI, like StreamMulticast stream keys.
+
+The Facebook flow requires a Meta developer app with Device Login enabled and the relevant Page permissions approved/available for the account. Until that app configuration exists, the existing manual Facebook endpoint remains fully supported.
+
+---
 ## Usage
 
 1. Open the **Multistream** dock (`View → Docks → Multistream`)
