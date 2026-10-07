@@ -71,10 +71,11 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 					ctrl->stop();
 			}
 		}
-	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED) {
-		/* obs_frontend_get_current_scene() returns Program while Studio Mode
-		 * is active, so rotated vertical endpoints follow the actual live
-		 * scene rather than Preview. */
+	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED ||
+	           event == OBS_FRONTEND_EVENT_TRANSITION_CHANGED) {
+		/* Rotated endpoints render OBS output channel 0 (the Program
+		 * transition source). Refresh when OBS swaps scene/transition
+		 * objects so animation and Studio Mode Program remain exact. */
 		for (auto &ep : g_registry->all()) {
 			auto ctrl = g_registry->controller_for(ep.id);
 			if (ctrl)
