@@ -236,13 +236,11 @@ void OutputController::finish_handoff_wait()
 			m_state = OutputState::Idle;
 	}
 
-	/* Publish the open gate only after state is ready, so a concurrent
-	 * frontend start can never observe unblocked + Stopping and miss its
-	 * only automatic start event. */
+	/* Publish the open gate only after state is ready. Do NOT execute a
+	 * deferred start here: this method runs on ControllerReaper's worker
+	 * thread, while cloning OBS-native settings touches frontend APIs.
+	 * ConfigTab's UI timer consumes m_start_requested safely on Qt's thread. */
 	m_start_blocked.store(false);
-
-	if (m_start_requested.load())
-		request_start_when_ready();
 }
 
 std::string OutputController::last_error() const
@@ -836,8 +834,9 @@ void OutputController::stop()
 				self->m_state = OutputState::Idle;
 		}
 
-		if (self->m_start_requested.load())
-			self->request_start_when_ready();
+		/* m_start_requested, if set by a rapid OBS stop→start, is left for
+		 * the Qt-owned ConfigTab timer to consume. Never call frontend-facing
+		 * encoder setup from this reaper worker thread. */
 	});
 }
 
