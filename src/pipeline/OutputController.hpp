@@ -265,6 +265,9 @@ private:
 	EncoderFactory      m_factory;
 	ControllerReaper   &m_reaper;
 
+	/* Serializes only the short start/stop transition. Heavy teardown still
+	 * runs on ControllerReaper, so the Qt thread never waits on sockets. */
+	mutable std::mutex  m_lifecycle_mutex;
 	mutable std::mutex  m_mutex;
 	OutputState         m_state    {OutputState::Idle};
 	std::string         m_last_error;
