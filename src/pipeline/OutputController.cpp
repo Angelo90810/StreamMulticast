@@ -405,8 +405,10 @@ bool OutputController::start()
 	std::lock_guard<std::mutex> lifecycle_lock(m_lifecycle_mutex);
 
 	if (!m_endpoint.enabled || m_retired.load() || m_shutdown_done.load()) {
-		obs_log(LOG_WARNING, "OutputController [%s]: start ignored because endpoint is disabled",
-		        m_endpoint.name.c_str());
+		const char *reason = !m_endpoint.enabled ? "endpoint disabled"
+			: (m_retired.load() ? "controller retired" : "controller shutting down");
+		obs_log(LOG_WARNING, "OutputController [%s]: start ignored (%s)",
+		        m_endpoint.name.c_str(), reason);
 		return false;
 	}
 
@@ -881,7 +883,7 @@ void OutputController::handle_stop(int code)
 	}
 
 	/* CONNECT_FAILED / ERROR / DISCONNECTED / ENCODE_ERROR — reconnect-eligible. */
-	if (m_shutdown_done.load()) {
+	if (m_retired.load() || m_shutdown_done.load()) {
 		/* shutdown_blocking() has already claimed this controller — do not
 		 * spawn new work that shutdown_blocking() would then have to race
 		 * to join. */
