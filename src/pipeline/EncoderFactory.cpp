@@ -217,10 +217,13 @@ obs_encoder_t *EncoderFactory::create_video_encoder(const Endpoint &ep,
 	obs_data_set_string(settings, "rate_control", "CBR");
 
 	if (type_id == "obs_x264") {
+		/* Match OBS's normal streaming defaults. Forcing "zerolatency"
+		 * disables compression tools and needlessly hurts quality at the
+		 * same bitrate; a multistream RTMP output does not require it. */
 		obs_data_set_string(settings, "preset", "veryfast");
 		obs_data_set_string(settings, "profile", "high");
-		obs_data_set_string(settings, "tune", "zerolatency");
-		obs_data_set_int(settings, "buffer_size", ep.video_bitrate_kbps);
+		obs_data_set_string(settings, "tune", "");
+		obs_data_set_bool(settings, "use_bufsize", false);
 	}
 
 	if (type_id == "obs_nvenc_h264_tex" || type_id == "obs_nvenc_hevc_tex" ||
