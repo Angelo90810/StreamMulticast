@@ -294,6 +294,7 @@ private:
 
 	std::thread         m_reconnect_thread;
 	std::atomic<bool>   m_stop_reconnect {false};
+	std::atomic<bool>   m_retired {false};
 
 	/** Guards shutdown_blocking() idempotency — set once, never reset. */
 	std::atomic<bool>   m_shutdown_done {false};
