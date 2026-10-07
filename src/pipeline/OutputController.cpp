@@ -272,7 +272,7 @@ bool OutputController::ensure_rotated_pipeline()
 
 	refresh_program_scene();
 	obs_log(LOG_INFO,
-	        "OutputController [%s]: rotated vertical view ready (1080x1920, Program +90deg)",
+	        "OutputController [%s]: rotated vertical view ready (1080x1920, Program transition +90deg)",
 	        m_endpoint.name.c_str());
 	return true;
 }
@@ -284,7 +284,10 @@ void OutputController::refresh_program_scene()
 	    !m_rotated_scene)
 		return;
 
-	obs_source_t *program = obs_frontend_get_current_scene();
+	/* Channel 0 is OBS's live Program transition source. Unlike
+	 * obs_frontend_get_current_scene(), it preserves transition animation
+	 * and the exact Program output in Studio Mode. */
+	obs_source_t *program = obs_get_output_source(0);
 	if (!program)
 		return;
 
