@@ -61,6 +61,7 @@ public:
 
 private slots:
 	void on_add_endpoint();
+	void on_add_instagram();
 	void on_edit_endpoint(const std::string &id);
 	void on_toggle_endpoint(const std::string &id, bool enabled);
 	void on_delete_endpoint(const std::string &id);
@@ -76,6 +77,7 @@ private:
 	EndpointRegistry &m_registry;
 	QListWidget *m_list {nullptr};
 	QLabel *m_empty_label {nullptr};
+	QPushButton *m_instagram_btn {nullptr};
 	QPushButton *m_add_btn {nullptr};
 	QTimer *m_runtime_timer {nullptr};
 
