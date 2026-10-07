@@ -8,6 +8,7 @@ GPLv2 — see LICENSE for full text.
 #include "ObsServiceImport.hpp"
 #include "../plugin-support.h"
 
+#include <obs.h>
 #include <obs-data.h>
 #include <util/platform.h>
 #include <util/base.h>
@@ -46,12 +47,61 @@ static std::string resolve_service_server(const std::string &service_name)
 	return {};
 }
 
+static bool try_import_live_obs_service(ObsServiceConfig &cfg)
+{
+	obs_output_t *output = obs_frontend_get_streaming_output();
+	if (!output)
+		return false;
+
+	obs_service_t *service = obs_output_get_service(output);
+	if (!service) {
+		obs_output_release(output);
+		return false;
+	}
+
+	const char *server = obs_service_get_connect_info(
+		service, OBS_SERVICE_CONNECT_INFO_SERVER_URL);
+	const char *key = obs_service_get_connect_info(
+		service, OBS_SERVICE_CONNECT_INFO_STREAM_KEY);
+
+	obs_data_t *settings = obs_service_get_settings(service);
+	const char *service_setting = settings
+		? obs_data_get_string(settings, "service") : nullptr;
+	const char *service_name = obs_service_get_name(service);
+
+	cfg.server_url = server ? server : "";
+	cfg.stream_key = key ? key : "";
+	cfg.service_name =
+		(service_setting && *service_setting) ? service_setting
+		: (service_name ? service_name : "");
+
+	if (settings)
+		obs_data_release(settings);
+	obs_output_release(output);
+
+	if (cfg.server_url.empty() || cfg.stream_key.empty())
+		return false;
+
+	cfg.ok = true;
+	obs_log(LOG_INFO,
+	        "ObsServiceImport: imported active OBS service '%s' (server=%s)",
+	        cfg.service_name.c_str(), cfg.server_url.c_str());
+	return true;
+}
+
 /* -----------------------------------------------------------------------
  * import_from_active_obs_profile
  * ----------------------------------------------------------------------- */
 ObsServiceConfig import_from_active_obs_profile()
 {
 	ObsServiceConfig cfg;
+
+	/* Prefer OBS's live service object. It already resolves service-specific
+	 * "auto" servers and avoids duplicating/staling the services.json table.
+	 * Keep the profile-file path as a compatibility fallback for outputs that
+	 * have not yet materialized their service object. */
+	if (try_import_live_obs_service(cfg))
+		return cfg;
 
 	/* Ask OBS for the exact active profile directory.  Profile display
 	 * names and directory names can differ (ProfileDir), so reconstructing
