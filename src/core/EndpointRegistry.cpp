@@ -13,7 +13,7 @@ GPLv2 — see LICENSE for full text.
 #include <algorithm>
 #include <cassert>
 #include <unordered_set>
-#include <obs.h>
+
 
 namespace smulti {
 
@@ -198,29 +198,15 @@ void EndpointRegistry::update(const Endpoint &ep)
 		m_reaper.enqueue(old_ctrl);
 	}
 
-	if (was_running) {
-		/* Do not start the replacement until the reaper has fully destroyed
-		 * the old RTMP output/encoders. Starting immediately after stop()
-		 * used to create a short double-stream / double-NVENC window.
-		 *
-		 * The new controller is pinned by the queued task. If it gets
-		 * replaced/removed again before the UI callback executes, retire()
-		 * makes start() a harmless no-op. */
+	if (was_running && ep.enabled) {
+		/* Mark the replacement as temporarily unavailable.  The reaper only
+		 * flips it back to Idle after every old-session teardown job ahead
+		 * of this one has completed.  The UI decides whether/when to restart
+		 * it, so no queued callback can outlive the plugin DLL. */
 		auto ctrl = controller_for(ep.id);
 		if (ctrl) {
-			m_reaper.enqueue([ctrl]() {
-				auto *holder = new std::shared_ptr<OutputController>(ctrl);
-				obs_queue_task(
-					OBS_TASK_UI,
-					[](void *param) {
-						std::unique_ptr<std::shared_ptr<OutputController>> p(
-							static_cast<std::shared_ptr<OutputController> *>(param));
-						if (*p)
-							(*p)->start();
-					},
-					holder,
-					false);
-			});
+			ctrl->begin_handoff_wait();
+			m_reaper.enqueue([ctrl]() { ctrl->finish_handoff_wait(); });
 		}
 	}
 
