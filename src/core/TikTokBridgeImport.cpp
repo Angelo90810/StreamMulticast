@@ -12,6 +12,8 @@ GPLv2 — see LICENSE for full text.
 #include <util/platform.h>
 #include <util/base.h>
 #include <util/bmem.h>
+#include <QtCore/QDateTime>
+#include <QtCore/QString>
 
 namespace smulti {
 
@@ -76,6 +78,21 @@ TikTokBridgeConfig import_tiktok_bridge_file(const std::string &path)
 	if (cfg.stream_key.empty()) {
 		cfg.error_message = "TikTok Bridge JSON is missing stream_key/key";
 		return cfg;
+	}
+
+	if (!cfg.expires_at.empty()) {
+		const QString raw = QString::fromStdString(cfg.expires_at);
+		QDateTime expiry = QDateTime::fromString(raw, Qt::ISODateWithMs);
+		if (!expiry.isValid())
+			expiry = QDateTime::fromString(raw, Qt::ISODate);
+		if (!expiry.isValid()) {
+			cfg.error_message = "TikTok Bridge expires_at is not a valid ISO-8601 timestamp";
+			return cfg;
+		}
+		if (expiry.toUTC() <= QDateTime::currentDateTimeUtc()) {
+			cfg.error_message = "TikTok Bridge credentials have expired; refresh the bridge data before importing";
+			return cfg;
+		}
 	}
 
 	cfg.ok = true;
