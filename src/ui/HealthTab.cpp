@@ -66,6 +66,7 @@ QString HealthTableModel::state_label(OutputState s) const
 	case OutputState::Live:         return tr("Live");
 	case OutputState::Reconnecting: return tr("Reconnecting");
 	case OutputState::FailedHard:   return tr("Error");
+	case OutputState::Stopping:     return tr("Stopping...");
 	default:                        return tr("Unknown");
 	}
 }
@@ -77,6 +78,7 @@ QColor HealthTableModel::state_color(OutputState s) const
 	case OutputState::Starting:     return QColor(0xf39c12); // orange
 	case OutputState::Reconnecting: return QColor(0xf1c40f); // yellow
 	case OutputState::FailedHard:   return QColor(0xe74c3c); // red
+	case OutputState::Stopping:     return QColor(0x7f8c8d); // grey
 	default:                        return QColor(0x95a5a6); // grey
 	}
 }
@@ -99,7 +101,8 @@ QVariant HealthTableModel::data(const QModelIndex &index, int role) const
 		case COL_STATUS:
 			return state_label(state);
 		case COL_TARGET:
-			return snap ? QString::number(snap->target_bitrate) : QStringLiteral("—");
+			if (!snap || snap->target_bitrate < 0) return QStringLiteral("—");
+			return QString::number(snap->target_bitrate);
 		case COL_ACTUAL:
 			if (!snap || state != OutputState::Live) return QStringLiteral("—");
 			return QString::number(static_cast<int>(snap->actual_bitrate));
@@ -108,7 +111,8 @@ QVariant HealthTableModel::data(const QModelIndex &index, int role) const
 		case COL_RECONNECTS:
 			return snap ? QString::number(snap->reconnect_count) : QStringLiteral("—");
 		case COL_UPTIME:
-			if (!snap || state == OutputState::Idle) return QStringLiteral("—");
+			if (!snap || (state != OutputState::Live && state != OutputState::Reconnecting))
+				return QStringLiteral("—");
 			{
 				int64_t s_total = snap->uptime_sec;
 				int     h = static_cast<int>(s_total / 3600);
