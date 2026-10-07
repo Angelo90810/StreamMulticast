@@ -102,6 +102,12 @@ bool ConfigStore::load()
  * ----------------------------------------------------------------------- */
 bool ConfigStore::save(const std::vector<Endpoint> &endpoints)
 {
+	if (m_writes_blocked.load()) {
+		obs_log(LOG_WARNING,
+		        "ConfigStore: refusing to overwrite config written by a newer schema");
+		return false;
+	}
+
 	/* Serialize generation assignment with the pending snapshot itself.
 	 * Incrementing the atomic before taking m_pending_mutex allowed two
 	 * concurrent callers to acquire the mutex in reverse order and publish
@@ -134,6 +140,9 @@ bool ConfigStore::save(const std::vector<Endpoint> &endpoints)
  * ----------------------------------------------------------------------- */
 void ConfigStore::schedule_save(const std::vector<Endpoint> &endpoints)
 {
+	if (m_writes_blocked.load())
+		return;
+
 	std::lock_guard<std::mutex> lock(m_pending_mutex);
 	const uint64_t generation = m_save_generation.fetch_add(1) + 1;
 	m_pending_endpoints   = endpoints;
@@ -265,6 +274,18 @@ bool ConfigStore::read_from_disk(const std::string &path, std::vector<Endpoint> 
 		return false;
 
 	int schema_version = static_cast<int>(obs_data_get_int(root, "schema_version"));
+
+	if (schema_version > CURRENT_SCHEMA_VERSION) {
+		/* Forward-compatible read-only mode: deserialize fields this build
+		 * understands so the user can still inspect/use endpoints, but
+		 * block every write so unknown fields from the newer schema can
+		 * never be silently destroyed by a downgrade. */
+		m_writes_blocked.store(true);
+		obs_log(LOG_WARNING,
+		        "ConfigStore: config schema v%d is newer than supported v%d; "
+		        "loading known fields read-only and preserving the original file",
+		        schema_version, CURRENT_SCHEMA_VERSION);
+	}
 
 	obs_data_array_t *arr = obs_data_get_array(root, "endpoints");
 	if (!arr) {
