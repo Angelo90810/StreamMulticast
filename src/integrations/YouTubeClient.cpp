@@ -205,7 +205,7 @@ void YouTubeClient::refresh_access_token(const QString &client_id,
 	form.addQueryItem(QStringLiteral("refresh_token"), refresh_token);
 	form.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("refresh_token"));
 
-	QNetworkRequest request(QUrl(QString::fromLatin1(GOOGLE_TOKEN_URL)));
+	QNetworkRequest request{QUrl(QString::fromLatin1(GOOGLE_TOKEN_URL))};
 	request.setHeader(QNetworkRequest::ContentTypeHeader,
 	                  QStringLiteral("application/x-www-form-urlencoded"));
 
