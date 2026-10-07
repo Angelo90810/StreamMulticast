@@ -85,25 +85,11 @@ void HealthSampler::poll_loop()
 
 		for (const auto &ep : endpoints) {
 			live_ids.insert(ep.id);
-			/* M3: disabled endpoints are guaranteed non-running —
-			 * ConfigTab::on_toggle_endpoint() stops the output the moment
-			 * `enabled` flips to false, and a disabled endpoint is never
-			 * started in the first place.  Skip the controller_for() lookup
-			 * and OutputController's locked state()/last_error() getters
-			 * entirely and write a cheap Idle snapshot directly. */
-			if (!ep.enabled) {
-				const int target =
-					ep.video_settings_mode == EncoderSettingsMode::Custom &&
-					ep.audio_settings_mode == EncoderSettingsMode::Custom
-						? ep.video_bitrate_kbps + ep.audio_bitrate_kbps
-						: -1;
-				write_inactive_snapshot(ep, "", OutputState::Idle, target, 0);
-				continue;
-			}
 
-			/* shared_ptr copy — keeps the controller alive for this sample
-			 * even if EndpointRegistry concurrently removes/replaces it and
-			 * hands it to the ControllerReaper. */
+			/* Sample disabled endpoints too. stop() is asynchronous by design,
+			 * so an endpoint can legitimately be disabled while its controller
+			 * is still Stopping. Reporting it as instantly Offline hid that
+			 * real teardown state and made the UI lie during slow RTMP closes. */
 			auto ctrl = m_registry.controller_for(ep.id);
 			sample_output(ep, ctrl);
 		}
