@@ -26,6 +26,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include "pipeline/ControllerReaper.hpp"
 #include "pipeline/HealthSampler.hpp"
 #include "pipeline/OutputController.hpp"
+#include "pipeline/LifecyclePolicy.hpp"
 #include "ui/MultistreamDock.hpp"
 
 #include <QMainWindow>
@@ -65,45 +66,21 @@ static void reconcile_output_lifecycle()
 		if (!ctrl)
 			continue;
 
-		if (!ep.enabled) {
+		const auto decision = smulti::decide_lifecycle(
+			ep.enabled,
+			ep.linked_to_main,
+			main_active,
+			ctrl->state(),
+			ctrl->start_blocked(),
+			ctrl->start_requested(),
+			ctrl->has_session_resources());
+
+		if (decision.cancel_start_request)
 			ctrl->cancel_start_request();
-			if (ctrl->has_session_resources())
-				ctrl->stop();
-			continue;
-		}
-
-		if (ep.linked_to_main) {
-			if (!main_active) {
-				/* This also fixes Manual -> Linked while OBS is stopped:
-				 * an already-live manual endpoint is brought into line with
-				 * the new automatic policy instead of remaining live. */
-				ctrl->cancel_start_request();
-				if (ctrl->has_session_resources())
-					ctrl->stop();
-				continue;
-			}
-
-			/* Do not hammer a real FailedHard every timer tick.  Idle means
-			 * a fresh/reenabled endpoint; Stopping/start_blocked means a
-			 * valid deferred start is waiting on asynchronous teardown. */
-			const auto state = ctrl->state();
-			if (state == smulti::OutputState::Idle ||
-			    state == smulti::OutputState::Stopping ||
-			    ctrl->start_blocked() ||
-			    ctrl->start_requested()) {
-				ctrl->request_start_when_ready();
-			}
-			continue;
-		}
-
-		/* A manual endpoint only has a pending request when a previously-live
-		 * controller was replaced by a structural edit.  Preserve that live
-		 * intent without making manual endpoints auto-start in general. */
-		if (ctrl->start_requested() &&
-		    !ctrl->start_blocked() &&
-		    ctrl->state() != smulti::OutputState::Stopping) {
+		if (decision.stop)
+			ctrl->stop();
+		if (decision.request_start)
 			ctrl->request_start_when_ready();
-		}
 	}
 }
 
