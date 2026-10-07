@@ -15,7 +15,6 @@ GPLv2 — see LICENSE for full text.
 
 #include <chrono>
 #include <thread>
-#include <filesystem>
 
 namespace smulti {
 
@@ -58,14 +57,15 @@ std::string ConfigStore::resolve_config_path()
 	std::string path(raw);
 	bfree(raw);
 
-	/* Ensure directory exists */
-	std::filesystem::path dir = std::filesystem::path(path).parent_path();
-	if (!std::filesystem::exists(dir)) {
-		std::error_code ec;
-		std::filesystem::create_directories(dir, ec);
-		if (ec) {
-			obs_log(LOG_WARNING, "Could not create config dir: %s",
-			        ec.message().c_str());
+	/* libobs paths are UTF-8 on every platform.  std::filesystem::path
+	 * constructed from std::string uses the active Windows code page and can
+	 * corrupt profiles with non-ASCII user names.  Stay in libobs's UTF-8
+	 * path API end-to-end. */
+	const size_t slash = path.find_last_of("/\\");
+	if (slash != std::string::npos) {
+		const std::string dir = path.substr(0, slash);
+		if (!dir.empty() && os_mkdirs(dir.c_str()) == MKDIR_ERROR) {
+			obs_log(LOG_WARNING, "Could not create config dir: %s", dir.c_str());
 		}
 	}
 
@@ -252,7 +252,7 @@ bool ConfigStore::write_to_disk(const std::vector<Endpoint> &endpoints, const st
  * ----------------------------------------------------------------------- */
 bool ConfigStore::read_from_disk(const std::string &path, std::vector<Endpoint> &out)
 {
-	if (path.empty() || !std::filesystem::exists(path))
+	if (path.empty() || !os_file_exists(path.c_str()))
 		return false;
 
 	// AVANATRO-VERIFY: obs_data_create_from_json_file — confirm it returns nullptr on
