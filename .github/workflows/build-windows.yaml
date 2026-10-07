@@ -61,6 +61,25 @@ jobs:
             exit 1
           }
 
+      - name: Smoke test TikTok bridge helper
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "streammulticast-tiktok-bridge-test.json"
+          & "tools/tiktok-bridge/StreamMulticast.TikTokBridge.ps1" `
+            -Name "CI Bridge" `
+            -ServerUrl "rtmps://example.invalid/live" `
+            -StreamKey "ci-test-key" `
+            -ExpiresAt "2099-01-01T00:00:00Z" `
+            -OutputPath $out
+          if ($LASTEXITCODE -ne 0) { throw "TikTok bridge helper failed" }
+          $json = Get-Content -LiteralPath $out -Raw | ConvertFrom-Json
+          if ($json.name -ne "CI Bridge" -or
+              $json.server_url -ne "rtmps://example.invalid/live" -or
+              $json.stream_key -ne "ci-test-key" -or
+              $json.expires_at -ne "2099-01-01T00:00:00Z") {
+            throw "TikTok bridge helper wrote unexpected JSON"
+          }
+
       - name: Stage artifact
         shell: pwsh
         run: |
