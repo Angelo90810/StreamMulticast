@@ -71,6 +71,13 @@ struct Endpoint {
 	std::string server_url;
 	std::string stream_key;
 
+	/* Runtime-only preservation for a DPAPI value that cannot be decrypted
+	 * under the current Windows user (for example after copying a profile
+	 * between accounts). Never expose this raw blob in the UI; serialize it
+	 * back unchanged until the user supplies a replacement key. */
+	bool stream_key_decryption_failed = false;
+	std::string preserved_protected_stream_key;
+
 	/* Video */
 	EncoderSettingsMode video_settings_mode = EncoderSettingsMode::Custom;
 	VideoCodec video_codec = VideoCodec::H264;
