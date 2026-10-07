@@ -171,12 +171,13 @@ obs_encoder_t *EncoderFactory::clone_obs_audio_encoder(const Endpoint &ep,
 
 	const char *type_id_raw = obs_encoder_get_id(source);
 	const std::string type_id = type_id_raw ? type_id_raw : "";
+	const size_t mixer_idx = obs_encoder_get_mixer_index(source);
 	obs_data_t *settings = obs_encoder_get_settings(source);
 	std::string encoder_name = name_hint + "_audio_" + ep.id;
 
 	obs_encoder_t *enc = nullptr;
 	if (!type_id.empty() && settings) {
-		enc = obs_audio_encoder_create(type_id.c_str(), encoder_name.c_str(), settings, 0, nullptr);
+		enc = obs_audio_encoder_create(type_id.c_str(), encoder_name.c_str(), settings, mixer_idx, nullptr);
 	}
 
 	if (settings)
