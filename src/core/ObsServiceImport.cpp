@@ -10,8 +10,9 @@ GPLv2 — see LICENSE for full text.
 
 #include <obs-data.h>
 #include <util/platform.h>
+#include <util/base.h>
+#include <obs-frontend-api.h>
 
-#include <fstream>
 #include <string>
 
 namespace smulti {
@@ -35,7 +36,7 @@ static std::string resolve_service_server(const std::string &service_name)
 	if (service_name == "YouTube - RTMPS")
 		return "rtmps://a.rtmps.youtube.com/live2";
 	if (service_name == "Facebook Live")
-		return "rtmps://live-api-s.facebook.com:443/rtmp";
+		return "rtmps://rtmp-api.facebook.com:443/rtmp/";
 	if (service_name == "Kick")
 		return "rtmps://fa723fc1b171.global-contribute.live-video.net/app";
 	if (service_name == "Trovo")
@@ -46,81 +47,32 @@ static std::string resolve_service_server(const std::string &service_name)
 }
 
 /* -----------------------------------------------------------------------
- * Read [Basic] Profile=... from global.ini (plain INI parsing)
- * ----------------------------------------------------------------------- */
-static std::string find_active_profile(const std::string &globalIniPath)
-{
-	std::ifstream in(globalIniPath);
-	if (!in)
-		return {};
-
-	std::string line;
-	bool in_basic_section = false;
-	while (std::getline(in, line)) {
-		/* Trim trailing \r (Windows line endings) */
-		if (!line.empty() && line.back() == '\r')
-			line.pop_back();
-
-		if (line.empty())
-			continue;
-
-		if (line.front() == '[') {
-			in_basic_section = (line == "[Basic]");
-			continue;
-		}
-
-		if (in_basic_section && line.rfind("Profile=", 0) == 0) {
-			return line.substr(8);
-		}
-	}
-	return {};
-}
-
-/* -----------------------------------------------------------------------
  * import_from_active_obs_profile
  * ----------------------------------------------------------------------- */
 ObsServiceConfig import_from_active_obs_profile()
 {
 	ObsServiceConfig cfg;
 
-	/* 1. Find OBS config base directory */
-	char buf[1024] = {};
-	int written = os_get_config_path(buf, sizeof(buf), "obs-studio");
-	if (written <= 0) {
-		cfg.error_message = "Cannot find OBS config directory";
+	/* Ask OBS for the exact active profile directory.  Profile display
+	 * names and directory names can differ (ProfileDir), so reconstructing
+	 * this path from user.ini/global.ini is not reliable. */
+	char *profile_path_raw = obs_frontend_get_current_profile_path();
+	if (!profile_path_raw || !*profile_path_raw) {
+		if (profile_path_raw)
+			bfree(profile_path_raw);
+		cfg.error_message = "Cannot resolve the active OBS profile directory";
 		return cfg;
 	}
-	std::string base(buf);
+	std::string profile_path(profile_path_raw);
+	bfree(profile_path_raw);
 
-	/* 2. Read the active profile name.
-	 *
-	 * OBS 30+ moved per-user preferences (including the active Profile=)
-	 * from global.ini to user.ini.  We try user.ini first, fall back to
-	 * global.ini for older installations.
-	 *
-	 * Both files use the same INI layout: [Basic] Profile=<name>. */
-	std::string userIni   = base + "/user.ini";
-	std::string globalIni = base + "/global.ini";
+	obs_log(LOG_INFO, "ObsServiceImport: active profile path resolved");
 
-	std::string profile = find_active_profile(userIni);
-	std::string source  = "user.ini";
-	if (profile.empty()) {
-		profile = find_active_profile(globalIni);
-		source  = "global.ini";
-	}
-	if (profile.empty()) {
-		cfg.error_message = "No active OBS profile found in user.ini or global.ini";
-		return cfg;
-	}
-	obs_log(LOG_INFO,
-	        "ObsServiceImport: active profile '%s' (from %s)",
-	        profile.c_str(), source.c_str());
-
-	/* 3. Load service.json from the active profile */
-	std::string serviceJson = base + "/basic/profiles/" + profile + "/service.json";
+	/* Load service.json from the exact active profile directory. */
+	std::string serviceJson = profile_path + "/service.json";
 	obs_data_t *data = obs_data_create_from_json_file(serviceJson.c_str());
 	if (!data) {
-		cfg.error_message = "service.json not found or invalid in profile '" + profile + "'";
+		cfg.error_message = "service.json not found or invalid in the active OBS profile";
 		return cfg;
 	}
 
@@ -149,8 +101,8 @@ ObsServiceConfig import_from_active_obs_profile()
 
 	/* 6. Validate */
 	if (cfg.stream_key.empty()) {
-		cfg.error_message = "No stream key in profile '" + profile +
-		                    "' (have you connected an account in OBS?)";
+		cfg.error_message = "No stream key in the active OBS profile "
+		                    "(have you connected an account in OBS?)";
 		return cfg;
 	}
 	if (cfg.server_url.empty()) {
@@ -161,8 +113,8 @@ ObsServiceConfig import_from_active_obs_profile()
 
 	cfg.ok = true;
 	obs_log(LOG_INFO,
-	        "ObsServiceImport: imported '%s' from profile '%s' (server=%s)",
-	        cfg.service_name.c_str(), profile.c_str(), cfg.server_url.c_str());
+	        "ObsServiceImport: imported '%s' from active OBS profile (server=%s)",
+	        cfg.service_name.c_str(), cfg.server_url.c_str());
 	return cfg;
 }
 
