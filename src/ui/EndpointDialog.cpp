@@ -26,7 +26,6 @@ const std::vector<EndpointDialog::ServerTemplate> EndpointDialog::s_templates = 
 	{ QStringLiteral("YouTube"),     QStringLiteral("rtmps://a.rtmps.youtube.com:443/live2") },
 	{ QStringLiteral("Facebook"),    QStringLiteral("rtmps://rtmp-api.facebook.com:443/rtmp/") },
 	{ QStringLiteral("TikTok"),      QStringLiteral("rtmp://push-rtmp.tiktokcdn.com/live") },
-	{ QStringLiteral("Kick"),        QStringLiteral("rtmp://ingest.global-contribute.live-video.net/app") },
 	{ QStringLiteral("Trovo"),       QStringLiteral("rtmp://livepush.trovo.live/live/") },
 };
 
@@ -177,7 +176,7 @@ void EndpointDialog::setup_ui()
 	outer->addWidget(m_status_label);
 
 	auto *btn_row = new QHBoxLayout();
-	m_test_btn = new QPushButton(tr("Test Connection"), this);
+	m_test_btn = new QPushButton(tr("How to Test"), this);
 	m_save_btn = new QPushButton(tr("Save"), this);
 	m_cancel_btn = new QPushButton(tr("Cancel"), this);
 	m_save_btn->setDefault(true);
@@ -455,8 +454,9 @@ void EndpointDialog::on_import_tiktok_bridge()
 void EndpointDialog::on_test_connection()
 {
 	m_status_label->setText(
-		tr("Use the manual Start button (with automatic start disabled) to perform a real "
-		   "endpoint test. The Health tab shows the actual RTMP result."));
+		tr("A real RTMP test necessarily authenticates/publishes to the destination. "
+		   "Disable automatic start, save the endpoint, then use its manual Start button. "
+		   "The Health tab shows the actual server result."));
 	m_status_label->setVisible(true);
 }
 
