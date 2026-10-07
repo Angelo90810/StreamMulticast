@@ -75,6 +75,7 @@ private:
 
 	EndpointRegistry &m_registry;
 	QListWidget *m_list {nullptr};
+	QLabel *m_empty_label {nullptr};
 	QPushButton *m_add_btn {nullptr};
 	QTimer *m_runtime_timer {nullptr};
 
