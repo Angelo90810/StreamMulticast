@@ -26,7 +26,10 @@ Read JSON or simple server/key text from the clipboard:
 .\StreamMulticast.TikTokBridge.ps1 -FromClipboard
 ```
 
-Write explicit values:
+For interactive use, prefer the secure prompt or clipboard import so the
+stream key is not left in PowerShell command history.
+
+For automation only, explicit values are supported:
 
 ```powershell
 .\StreamMulticast.TikTokBridge.ps1 `
@@ -34,6 +37,9 @@ Write explicit values:
   -StreamKey "your-temporary-key" `
   -ExpiresAt "2026-06-08T22:00:00Z"
 ```
+
+The script warns when `-StreamKey` is passed on the command line because it
+may be retained in shell history.
 
 Optionally start an external helper chosen by the user:
 
