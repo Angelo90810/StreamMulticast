@@ -117,7 +117,7 @@ The first v2 slice is now under development in the `Hub` tab:
 - **Prepare YouTube + Facebook** prepares both connected destinations from one title/description/schedule/privacy form. YouTube uses auto-start/auto-stop on the OBS-native stream; Facebook remains unpublished until its explicit Publish button is pressed after preview.
 - Hub refresh/Page tokens are stored with Windows DPAPI, like StreamMulticast stream keys.
 
-The YouTube flow requires a Google Cloud **Desktop OAuth client** with YouTube Data API v3 enabled. The OAuth callback is a random local `127.0.0.1` port and uses PKCE; only the refresh token is persisted, protected by Windows DPAPI. The Facebook flow requires a Meta developer app with Device Login enabled and the relevant Page permissions approved/available for the account. Until those app credentials exist, the existing manual endpoints remain fully supported.
+The YouTube flow requires a Google Cloud **Desktop OAuth client** with YouTube Data API v3 enabled. The OAuth callback is a random local `127.0.0.1` port and uses PKCE; only the refresh token is persisted, protected by Windows DPAPI. The Facebook flow requires a Meta developer app with Device Login enabled and the Page/Live permissions available for the account: `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, and `publish_video`. Production use may require Meta App Review. Until those app credentials exist, the existing manual endpoints remain fully supported.
 
 ---
 ## Usage

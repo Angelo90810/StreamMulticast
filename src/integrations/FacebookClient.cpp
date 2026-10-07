@@ -59,7 +59,7 @@ void FacebookClient::start_device_login(const QString &app_id, const QString &cl
 	form.addQueryItem(QStringLiteral("access_token"), m_client_access_token);
 	form.addQueryItem(
 		QStringLiteral("scope"),
-		QStringLiteral("public_profile,pages_show_list,pages_read_engagement,pages_manage_posts"));
+		QStringLiteral("public_profile,pages_show_list,pages_read_engagement,pages_manage_posts,publish_video"));
 
 	auto *reply = post_form(QUrl(QString::fromLatin1(GRAPH_BASE) + QStringLiteral("/device/login")), form);
 	connect(reply, &QNetworkReply::finished, this, [this, reply]() {
