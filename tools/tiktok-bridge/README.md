@@ -49,16 +49,15 @@ Optionally start an external helper chosen by the user:
   -FromClipboard
 ```
 
-The bridge file format is:
+The bundled script writes the stream key using Windows DPAPI (CurrentUser), so the handoff file does not contain a reusable plaintext key:
 
 ```json
 {
   "name": "TikTok Bridge",
   "server_url": "rtmp://push-rtmp.tiktokcdn.com/live",
-  "stream_key": "your-temporary-key",
+  "stream_key_protected": "dpapi:<encrypted-hex>",
   "expires_at": "2026-06-08T22:00:00Z"
 }
 ```
 
-`server` can be used instead of `server_url`, and `key` can be used instead of
-`stream_key`.
+Legacy/third-party bridge files using `stream_key`/`key` are still accepted for compatibility. `server` can be used instead of `server_url`. If `expires_at` is present, StreamMulticast rejects invalid or expired timestamps instead of attempting the RTMP connection.
