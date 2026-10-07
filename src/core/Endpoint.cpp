@@ -9,8 +9,8 @@ GPLv2 — see LICENSE for full text.
 
 #include <obs-data.h>
 
-#include <cstdlib>
-#include <ctime>
+#include <random>
+#include <array>
 #include <sstream>
 #include <iomanip>
 
@@ -18,25 +18,33 @@ namespace smulti {
 
 std::string Endpoint::generate_uuid()
 {
-	static bool seeded = false;
-	if (!seeded) {
-		srand(static_cast<unsigned>(time(nullptr)));
-		seeded = true;
-	}
+	/* MSVC rand() only provides 15 useful bits.  Use the standard random
+	 * facility so endpoint identity remains collision-resistant even across
+	 * rapid add/import operations and multiple OBS processes. */
+	static thread_local std::mt19937_64 rng([] {
+		std::random_device rd;
+		std::seed_seq seed{
+			rd(), rd(), rd(), rd(), rd(), rd(), rd(), rd()
+		};
+		return std::mt19937_64(seed);
+	}());
 
-	auto rand_hex = [](int bits) -> unsigned int {
-		if (bits >= 32)
-			return static_cast<unsigned int>(rand());
-		return static_cast<unsigned int>(rand()) & ((1u << bits) - 1u);
-	};
+	std::uniform_int_distribution<unsigned int> byte_dist(0, 255);
+	std::array<unsigned char, 16> bytes{};
+	for (auto &b : bytes)
+		b = static_cast<unsigned char>(byte_dist(rng));
+
+	/* RFC 4122 variant + version 4 bits. */
+	bytes[6] = static_cast<unsigned char>((bytes[6] & 0x0F) | 0x40);
+	bytes[8] = static_cast<unsigned char>((bytes[8] & 0x3F) | 0x80);
 
 	std::ostringstream ss;
 	ss << std::hex << std::setfill('0');
-	ss << std::setw(8) << rand_hex(32) << '-';
-	ss << std::setw(4) << rand_hex(16) << '-';
-	ss << std::setw(4) << (0x4000u | rand_hex(12)) << '-';
-	ss << std::setw(4) << (0x8000u | rand_hex(14)) << '-';
-	ss << std::setw(12) << ((static_cast<uint64_t>(rand_hex(32)) << 16) | rand_hex(16));
+	for (size_t i = 0; i < bytes.size(); ++i) {
+		if (i == 4 || i == 6 || i == 8 || i == 10)
+			ss << '-';
+		ss << std::setw(2) << static_cast<unsigned int>(bytes[i]);
+	}
 	return ss.str();
 }
 
@@ -99,21 +107,37 @@ Endpoint Endpoint::deserialize(obs_data_t *data)
 	ep.stream_key = obs_data_get_string(data, "stream_key");
 
 	/* Missing v2 keys deliberately preserve the old endpoint behaviour. */
-	ep.video_settings_mode = obs_data_has_user_value(data, "video_settings_mode")
-		? static_cast<EncoderSettingsMode>(static_cast<int>(obs_data_get_int(data, "video_settings_mode")))
-		: EncoderSettingsMode::Custom;
-	ep.video_codec = obs_data_has_user_value(data, "video_codec")
-		? static_cast<VideoCodec>(static_cast<int>(obs_data_get_int(data, "video_codec")))
-		: VideoCodec::H264;
+	int video_mode = obs_data_has_user_value(data, "video_settings_mode")
+		? static_cast<int>(obs_data_get_int(data, "video_settings_mode"))
+		: static_cast<int>(EncoderSettingsMode::Custom);
+	if (video_mode < static_cast<int>(EncoderSettingsMode::Custom) ||
+	    video_mode > static_cast<int>(EncoderSettingsMode::UseOBS))
+		video_mode = static_cast<int>(EncoderSettingsMode::Custom);
+	ep.video_settings_mode = static_cast<EncoderSettingsMode>(video_mode);
 
-	ep.encoder_backend = static_cast<EncoderBackend>(
-		static_cast<int>(obs_data_get_int(data, "encoder_backend")));
+	int codec = obs_data_has_user_value(data, "video_codec")
+		? static_cast<int>(obs_data_get_int(data, "video_codec"))
+		: static_cast<int>(VideoCodec::H264);
+	if (codec < static_cast<int>(VideoCodec::H264) ||
+	    codec > static_cast<int>(VideoCodec::HEVC))
+		codec = static_cast<int>(VideoCodec::H264);
+	ep.video_codec = static_cast<VideoCodec>(codec);
+
+	int backend = static_cast<int>(obs_data_get_int(data, "encoder_backend"));
+	if (backend < static_cast<int>(EncoderBackend::X264) ||
+	    backend > static_cast<int>(EncoderBackend::AMF))
+		backend = static_cast<int>(EncoderBackend::X264);
+	ep.encoder_backend = static_cast<EncoderBackend>(backend);
 	ep.video_bitrate_kbps = static_cast<int>(obs_data_get_int(data, "video_bitrate"));
 	ep.keyframe_interval_sec = static_cast<int>(obs_data_get_int(data, "keyframe_interval"));
 
-	ep.audio_settings_mode = obs_data_has_user_value(data, "audio_settings_mode")
-		? static_cast<EncoderSettingsMode>(static_cast<int>(obs_data_get_int(data, "audio_settings_mode")))
-		: EncoderSettingsMode::Custom;
+	int audio_mode = obs_data_has_user_value(data, "audio_settings_mode")
+		? static_cast<int>(obs_data_get_int(data, "audio_settings_mode"))
+		: static_cast<int>(EncoderSettingsMode::Custom);
+	if (audio_mode < static_cast<int>(EncoderSettingsMode::Custom) ||
+	    audio_mode > static_cast<int>(EncoderSettingsMode::UseOBS))
+		audio_mode = static_cast<int>(EncoderSettingsMode::Custom);
+	ep.audio_settings_mode = static_cast<EncoderSettingsMode>(audio_mode);
 	ep.audio_bitrate_kbps = static_cast<int>(obs_data_get_int(data, "audio_bitrate"));
 
 	int orientation = static_cast<int>(obs_data_get_int(data, "orientation"));
@@ -128,7 +152,8 @@ Endpoint Endpoint::deserialize(obs_data_t *data)
 
 	if (ep.video_bitrate_kbps < 500) ep.video_bitrate_kbps = 500;
 	if (ep.video_bitrate_kbps > 50000) ep.video_bitrate_kbps = 50000;
-	if (ep.keyframe_interval_sec <= 0) ep.keyframe_interval_sec = 2;
+	if (ep.keyframe_interval_sec < 1 || ep.keyframe_interval_sec > 10)
+		ep.keyframe_interval_sec = 2;
 	if (ep.audio_bitrate_kbps <= 0) ep.audio_bitrate_kbps = 160;
 
 	return ep;
