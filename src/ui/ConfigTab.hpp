@@ -15,8 +15,11 @@ GPLv2 — see LICENSE for full text.
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QCheckBox>
 #include <QtCore/QTimer>
+#include <memory>
 
 namespace smulti {
+
+class OutputController;
 
 enum class OutputState : int;
 
@@ -65,6 +68,9 @@ private slots:
 	void on_manual_start_stop(const std::string &id);
 	void on_list_reorder();
 	void refresh_runtime_states();
+	void restart_when_ready(const std::string &id,
+	                        std::weak_ptr<OutputController> expected,
+	                        int attempt = 0);
 
 private:
 	void setup_ui();
