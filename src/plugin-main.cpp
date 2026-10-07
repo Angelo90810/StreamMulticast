@@ -65,7 +65,7 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 	} else if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPED) {
 		obs_log(LOG_INFO, "OBS main stream stopped — stopping linked endpoints");
 		for (auto &ep : g_registry->all()) {
-			if (ep.enabled && ep.linked_to_main) {
+			if (ep.linked_to_main) {
 				auto ctrl = g_registry->controller_for(ep.id);
 				if (ctrl)
 					ctrl->stop();
@@ -150,6 +150,19 @@ bool obs_module_load()
 		                      "dock id already in use, deleting unregistered dock");
 		delete g_dock;
 		g_dock = nullptr;
+	}
+
+	/* Plugin reloads can happen while OBS is already streaming. Catch up
+	 * linked endpoints instead of relying exclusively on a future frontend
+	 * STREAMING_STARTED event. */
+	if (obs_frontend_streaming_active()) {
+		for (auto &ep : g_registry->all()) {
+			if (!ep.enabled || !ep.linked_to_main)
+				continue;
+			auto ctrl = g_registry->controller_for(ep.id);
+			if (ctrl && !ctrl->has_active_session())
+				ctrl->start();
+		}
 	}
 
 	obs_log(LOG_INFO, "StreamMulticast v%s loaded successfully", PLUGIN_VERSION);
