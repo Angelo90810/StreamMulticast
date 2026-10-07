@@ -1,6 +1,6 @@
 # StreamMulticast
 
-**Current release:** v1.1.3 for OBS Studio 32.2.2 (Windows x64).
+**Current release:** v1.1.4 for OBS Studio 32.2.2 (Windows x64).
 
 > Multi-destination streaming for OBS Studio on **Windows x64** — **per-output bitrate**, **per-output orientation** (horizontal + vertical in parallel), free, open-source, no account, no cloud.
 
@@ -44,7 +44,7 @@ All three run **at the same time**, from the same OBS scene.
 - **Coexistence with OBS native streaming** — Twitch markers, replay buffer and recording stay untouched
 - **Auto-reconnect with backoff** — 1s / 2s / 5s / 10s / 30s / 60s, max 10 attempts before hard-fail
 - **Linked-to-main toggle** — optionally start/stop selected endpoints with OBS's main "Start Streaming"
-- **Pre-defined endpoint templates** — Twitch, YouTube, Facebook, Trovo, custom RTMP. Kick is intentionally custom/import-only because its ingest host is provider/session dependent.
+- **Pre-defined endpoint templates** — Twitch, YouTube, Facebook, Instagram, TikTok, Trovo, custom RTMP. Instagram uses the Live Producer RTMPS ingest preset; its per-session stream key still comes from Instagram Live Producer. Kick is intentionally custom/import-only because its ingest host is provider/session dependent.
 
 ### v1.1 — Manual control, OBS inheritance, HEVC and vertical modes
 - **Manual Start/Stop per endpoint** when automatic linkage to the OBS main stream is disabled

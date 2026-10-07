@@ -25,6 +25,7 @@ const std::vector<EndpointDialog::ServerTemplate> EndpointDialog::s_templates = 
 	{ QStringLiteral("Twitch"),      QStringLiteral("rtmp://live.twitch.tv/app") },
 	{ QStringLiteral("YouTube"),     QStringLiteral("rtmps://a.rtmps.youtube.com:443/live2") },
 	{ QStringLiteral("Facebook"),    QStringLiteral("rtmps://rtmp-api.facebook.com:443/rtmp/") },
+	{ QStringLiteral("Instagram"),   QStringLiteral("rtmps://live-upload.instagram.com:443/rtmp/") },
 	{ QStringLiteral("TikTok"),      QStringLiteral("rtmp://push-rtmp.tiktokcdn.com/live") },
 	{ QStringLiteral("Trovo"),       QStringLiteral("rtmp://livepush.trovo.live/live/") },
 };
