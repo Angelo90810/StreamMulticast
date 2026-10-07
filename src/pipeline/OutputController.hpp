@@ -177,6 +177,7 @@ public:
 
 	/** Cancel a deferred auto-start request (explicit/main stop wins). */
 	void cancel_start_request();
+	bool start_requested() const { return m_start_requested.load(); }
 
 	/**
 	 * Permanently retire this controller after the registry replaces/removes it.
