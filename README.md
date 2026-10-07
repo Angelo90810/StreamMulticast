@@ -1,5 +1,7 @@
 # StreamMulticast
 
+**Current audited release:** v1.1.2 for OBS Studio 32.2.2 (Windows x64).
+
 > Multi-destination streaming for OBS Studio on **Windows x64** — **per-output bitrate**, **per-output orientation** (horizontal + vertical in parallel), free, open-source, no account, no cloud.
 
 The features Aitum Multistream charges for, built right into OBS.
