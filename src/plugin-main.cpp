@@ -58,7 +58,7 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 		for (auto &ep : g_registry->all()) {
 			if (ep.enabled && ep.linked_to_main) {
 				auto ctrl = g_registry->controller_for(ep.id);
-				if (ctrl && !ctrl->is_running())
+				if (ctrl && !ctrl->has_active_session())
 					ctrl->start();
 			}
 		}
@@ -67,7 +67,7 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 		for (auto &ep : g_registry->all()) {
 			if (ep.enabled && ep.linked_to_main) {
 				auto ctrl = g_registry->controller_for(ep.id);
-				if (ctrl && ctrl->is_running())
+				if (ctrl)
 					ctrl->stop();
 			}
 		}
@@ -85,7 +85,7 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 		obs_log(LOG_INFO, "OBS exit — stopping all StreamMulticast outputs");
 		for (auto &ep : g_registry->all()) {
 			auto ctrl = g_registry->controller_for(ep.id);
-			if (ctrl && ctrl->is_running())
+			if (ctrl)
 				ctrl->stop();
 		}
 		if (g_health_sampler)
