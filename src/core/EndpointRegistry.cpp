@@ -171,7 +171,7 @@ void EndpointRegistry::update(const Endpoint &ep)
 {
 	bool controller_changed = false;
 	bool old_was_active = false;
-	bool old_handoff_pending = false;
+	bool old_needs_handoff = false;
 	bool disable_existing = false;
 	std::shared_ptr<OutputController> old_ctrl;
 	std::shared_ptr<OutputController> replacement;
@@ -203,12 +203,12 @@ void EndpointRegistry::update(const Endpoint &ep)
 			ctrl_it->second->set_enabled(ep.enabled);
 		} else {
 			old_was_active = ctrl_it->second->has_active_session();
-			old_handoff_pending = ctrl_it->second->start_blocked() ||
-			                      ctrl_it->second->state() == OutputState::Stopping;
+			old_needs_handoff = ctrl_it->second->has_session_resources() ||
+			                    ctrl_it->second->start_blocked();
 			old_ctrl = std::move(ctrl_it->second);
 
 			replacement = std::make_shared<OutputController>(ep, m_reaper);
-			if (old_was_active || old_handoff_pending)
+			if (old_needs_handoff)
 				replacement->begin_handoff_wait();
 			ctrl_it->second = replacement;
 		}
@@ -219,7 +219,7 @@ void EndpointRegistry::update(const Endpoint &ep)
 		old_ctrl->stop();
 		m_reaper.enqueue(old_ctrl);
 
-		if (replacement && (old_was_active || old_handoff_pending)) {
+		if (replacement && old_needs_handoff) {
 			/* ControllerReaper is FIFO. This task therefore runs only after
 			 * every teardown job queued for the prior controller(s), which
 			 * makes a rapid sequence of edits safe as well. */
