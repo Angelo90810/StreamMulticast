@@ -73,6 +73,22 @@ jobs:
           }
           Copy-Item "data/locale/en-US.ini" "$stage/data/obs-plugins/${{ env.PLUGIN_NAME }}/locale/"
 
+      - name: Validate package layout
+        shell: pwsh
+        run: |
+          $required = @(
+            "stage/obs-plugins/64bit/${{ env.PLUGIN_NAME }}.dll",
+            "stage/data/obs-plugins/${{ env.PLUGIN_NAME }}/locale/en-US.ini"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Missing required packaged file: $path"
+            }
+          }
+          if (Test-Path -LiteralPath "stage/${{ env.PLUGIN_NAME }}") {
+            throw "Invalid extra plugin root directory in package: stage/${{ env.PLUGIN_NAME }}"
+          }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
