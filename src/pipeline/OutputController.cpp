@@ -146,6 +146,59 @@ bool OutputController::has_active_session() const
 	return is_running();
 }
 
+bool OutputController::has_session_resources() const
+{
+	std::lock_guard<std::mutex> lock(m_mutex);
+	return m_output != nullptr ||
+	       m_service != nullptr ||
+	       m_video_enc != nullptr ||
+	       m_audio_enc != nullptr ||
+	       m_reconnect_thread.joinable() ||
+	       m_state == OutputState::Stopping;
+}
+
+bool OutputController::request_start_when_ready()
+{
+	if (!m_enabled.load() || m_retired.load() || m_shutdown_done.load())
+		return false;
+
+	/* Record intent BEFORE checking the state. If stop() wins the lifecycle
+	 * mutex between this check and start(), the reaper completion sees this
+	 * flag and starts the freshly-idle controller instead of losing the
+	 * one-and-only frontend STREAMING_STARTED event. */
+	m_start_requested.store(true);
+
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		if (m_state == OutputState::Live ||
+		    m_state == OutputState::Starting ||
+		    m_state == OutputState::Reconnecting) {
+			m_start_requested.store(false);
+			return true;
+		}
+		if (m_state == OutputState::Stopping || m_start_blocked.load())
+			return true; /* accepted and deferred */
+	}
+
+	const bool started = start();
+	if (started) {
+		m_start_requested.store(false);
+		return true;
+	}
+
+	/* A real synchronous failure (bad encoder/config/etc.) is not a reason
+	 * to hammer the platform forever. Only preserve the request if teardown
+	 * or handoff became active concurrently. */
+	if (!m_start_blocked.load() && state() != OutputState::Stopping)
+		m_start_requested.store(false);
+	return false;
+}
+
+void OutputController::cancel_start_request()
+{
+	m_start_requested.store(false);
+}
+
 void OutputController::retire()
 {
 	m_retired.store(true);
@@ -187,6 +240,9 @@ void OutputController::finish_handoff_wait()
 	 * frontend start can never observe unblocked + Stopping and miss its
 	 * only automatic start event. */
 	m_start_blocked.store(false);
+
+	if (m_start_requested.load())
+		request_start_when_ready();
 }
 
 std::string OutputController::last_error() const
@@ -378,7 +434,7 @@ void OutputController::destroy_rotated_pipeline()
 /* -----------------------------------------------------------------------
  * do_create_output — creates the obs_output_t with RTMP service settings.
  * ----------------------------------------------------------------------- */
-void OutputController::do_create_output()
+bool OutputController::do_create_output()
 {
 	assert(!m_output);
 
@@ -399,7 +455,9 @@ void OutputController::do_create_output()
 	if (!service) {
 		obs_log(LOG_ERROR, "OutputController [%s]: obs_service_create failed",
 		        m_endpoint.name.c_str());
-		return;
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_last_error = "Could not create RTMP service";
+		return false;
 	}
 
 	/* Output settings */
@@ -418,7 +476,9 @@ void OutputController::do_create_output()
 		obs_log(LOG_ERROR, "OutputController [%s]: obs_output_create failed",
 		        m_endpoint.name.c_str());
 		obs_service_release(service);
-		return;
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_last_error = "Could not create RTMP output";
+		return false;
 	}
 
 	/* StreamMulticast owns reconnect policy. libobs enables its own reconnect
@@ -438,9 +498,12 @@ void OutputController::do_create_output()
 	signal_handler_connect(sh, "start", on_start_signal, this);
 	signal_handler_connect(sh, "stop",  on_stop_signal,  this);
 
-	std::lock_guard<std::mutex> lock(m_mutex);
-	m_output = new_output;
-	m_service = service;
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_output = new_output;
+		m_service = service;
+	}
+	return true;
 }
 
 /* -----------------------------------------------------------------------
@@ -501,13 +564,19 @@ bool OutputController::start()
 
 	/* Create output if not yet created */
 	if (!output) {
-		do_create_output();
+		if (!do_create_output()) {
+			set_state(OutputState::FailedHard);
+			return false;
+		}
 		std::lock_guard<std::mutex> lock(m_mutex);
 		output = m_output;
 	}
 
 	if (!output) {
-		set_state(OutputState::FailedHard);
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_state = OutputState::FailedHard;
+		if (m_last_error.empty())
+			m_last_error = "RTMP output is unavailable";
 		return false;
 	}
 
@@ -634,6 +703,8 @@ bool OutputController::start()
  * ----------------------------------------------------------------------- */
 void OutputController::stop()
 {
+	/* Explicit/main stop always wins over a previously deferred auto-start. */
+	m_start_requested.store(false);
 	std::lock_guard<std::mutex> lifecycle_lock(m_lifecycle_mutex);
 
 	/* Flag any in-flight reconnect to abort — checked by
@@ -759,9 +830,14 @@ void OutputController::stop()
 		 * vertical endpoint consumes no permanent 1080x1920 GPU render. */
 		self->destroy_rotated_pipeline();
 
-		std::lock_guard<std::mutex> lock(self->m_mutex);
-		if (self->m_state == OutputState::Stopping && !self->m_output)
-			self->m_state = OutputState::Idle;
+		{
+			std::lock_guard<std::mutex> lock(self->m_mutex);
+			if (self->m_state == OutputState::Stopping && !self->m_output)
+				self->m_state = OutputState::Idle;
+		}
+
+		if (self->m_start_requested.load())
+			self->request_start_when_ready();
 	});
 }
 
@@ -929,7 +1005,9 @@ void OutputController::on_stop_signal(void *data, calldata_t *cd)
 void OutputController::handle_stop(int code)
 {
 	if (code == OBS_OUTPUT_SUCCESS) {
-		set_state(OutputState::Idle);
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_state = OutputState::Idle;
+		m_connected_since = std::chrono::steady_clock::time_point{};
 		return;
 	}
 
@@ -950,7 +1028,7 @@ void OutputController::handle_stop(int code)
 	}
 
 	/* CONNECT_FAILED / ERROR / DISCONNECTED / ENCODE_ERROR — reconnect-eligible. */
-	if (m_retired.load() || m_shutdown_done.load()) {
+	if (!m_enabled.load() || m_retired.load() || m_shutdown_done.load()) {
 		/* shutdown_blocking() has already claimed this controller — do not
 		 * spawn new work that shutdown_blocking() would then have to race
 		 * to join. */
@@ -1054,7 +1132,6 @@ void OutputController::reconnect_thread_func()
 			++m_reconnect_attempt;
 			++m_total_reconnects;
 			current_attempt = m_reconnect_attempt;
-			do_release_encoders_locked();
 		}
 
 		/* Re-attach guard: signal_stop() fires before the output's internal
@@ -1086,14 +1163,23 @@ void OutputController::reconnect_thread_func()
 			continue;
 		}
 
-		/* Session-validity guard #1 — before creating encoders.  If stop()
-		 * detached this session (or start() reclaimed it) while we were
-		 * waiting above, bail out now rather than creating encoders for a
-		 * session nobody owns any more. */
+		/* The output is now inactive, so detach its encoder references
+		 * before releasing our own. Otherwise a failed reconnect loop can
+		 * retain old NVENC sessions indefinitely even though the controller
+		 * dropped its pointers. stop() cannot free captured_output under us:
+		 * its reaper job joins this reconnect thread first. */
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
 			if (m_stop_reconnect.load() || m_output != captured_output)
 				return;
+		}
+		obs_output_set_video_encoder(captured_output, nullptr);
+		obs_output_set_audio_encoder(captured_output, nullptr, 0);
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			if (m_stop_reconnect.load() || m_output != captured_output)
+				return;
+			do_release_encoders_locked();
 		}
 
 		obs_encoder_t *video_enc = m_factory.create_video_encoder(m_endpoint, "smulti");
