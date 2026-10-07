@@ -310,6 +310,10 @@ Endpoint EndpointDialog::collect_from_form() const
 	ep.server_url = m_server_edit->text().trimmed().toStdString();
 	/* Validate with trimmed() but preserve the exact key bytes entered. */
 	ep.stream_key = m_key_edit->text().toStdString();
+	if (!ep.stream_key.empty()) {
+		ep.stream_key_decryption_failed = false;
+		ep.preserved_protected_stream_key.clear();
+	}
 
 	ep.video_settings_mode = static_cast<EncoderSettingsMode>(
 		m_video_mode_cb->currentData().toInt());
