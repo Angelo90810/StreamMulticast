@@ -11,7 +11,10 @@ GPLv2 — see LICENSE for full text.
 #include <QObject>
 #include <QJsonArray>
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QTimer>
+#include <QUrl>
+#include <QUrlQuery>
 
 namespace smulti {
 
