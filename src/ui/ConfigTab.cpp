@@ -196,8 +196,7 @@ void ConfigTab::setup_ui()
 	m_empty_label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
 	m_empty_label->setText(
 		tr("No endpoints configured yet.\n\n"
-		   "Add a streaming destination below.\n"
-		   "Facebook (Hub) can also be created automatically from the Hub."));
+		   "Add a streaming destination below."));
 	outer_layout->addWidget(m_empty_label, 1);
 
 	m_list = new QListWidget(this);
