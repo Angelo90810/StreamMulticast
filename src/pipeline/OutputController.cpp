@@ -395,6 +395,11 @@ void OutputController::do_create_output()
 		return;
 	}
 
+	/* StreamMulticast owns reconnect policy. libobs enables its own reconnect
+	 * loop by default (20 retries), which would otherwise race our explicit
+	 * reconnect_thread_func() on OBS_OUTPUT_DISCONNECTED. */
+	obs_output_set_reconnect_settings(new_output, 0, 0);
+
 	/* obs_output_set_service() does NOT addref the service in libobs.
 	 * Keep our creation reference alive for the entire output lifetime and
 	 * release it only after obs_output_release() has destroyed/detached the
@@ -478,12 +483,24 @@ bool OutputController::start()
 		return false;
 	}
 
+	/* State and libobs activity must agree before a fresh start. If libobs
+	 * still reports active while our state is retryable, teardown has not
+	 * completed yet. Never replace encoders on an active output. */
+	if (obs_output_active(output)) {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_state = OutputState::FailedHard;
+		m_last_error = "Previous RTMP output is still active; wait for it to stop and retry";
+		obs_log(LOG_WARNING, "OutputController [%s]: retry blocked because previous output is still active",
+		        m_endpoint.name.c_str());
+		return false;
+	}
+
 	/* A previous hard failure can leave an inactive output with encoder
 	 * references still attached.  Detach those output-owned refs and release
 	 * our own before constructing a retry, otherwise repeated manual Starts
 	 * slowly accumulate stale encoders (particularly painful with NVENC
 	 * session limits). */
-	if (!obs_output_active(output)) {
+	{
 		obs_encoder_t *stale_video = nullptr;
 		obs_encoder_t *stale_audio = nullptr;
 		{
@@ -708,6 +725,11 @@ void OutputController::stop()
 		 * still touches service->output. */
 		if (service_to_release)
 			obs_service_release(service_to_release);
+
+		/* A rotated obs_view_t remains in OBS's render loop even with no
+		 * encoder attached. Destroy it on ordinary stop so an offline
+		 * vertical endpoint consumes no permanent 1080x1920 GPU render. */
+		self->destroy_rotated_pipeline();
 
 		std::lock_guard<std::mutex> lock(self->m_mutex);
 		if (self->m_state == OutputState::Stopping && !self->m_output)
