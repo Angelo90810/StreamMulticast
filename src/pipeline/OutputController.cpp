@@ -1105,8 +1105,21 @@ void OutputController::reconnect_thread_func()
 		if (delay < 0) {
 			obs_log(LOG_ERROR, "OutputController [%s]: max reconnect attempts reached — FailedHard",
 			        m_endpoint.name.c_str());
+
+			/* A failed reconnect can leave the final encoder pair attached
+			 * to an inactive output. Detach it before giving up so a dead
+			 * endpoint does not permanently consume a hardware encoder
+			 * session until the user manually retries/deletes it. */
+			if (!obs_output_active(captured_output) && !session_changed()) {
+				obs_output_set_video_encoder(captured_output, nullptr);
+				obs_output_set_audio_encoder(captured_output, nullptr, 0);
+			}
+
 			std::lock_guard<std::mutex> lock(m_mutex);
 			if (m_output == captured_output) {
+				do_release_encoders_locked();
+				m_effective_video_bitrate_kbps = -1;
+				m_effective_audio_bitrate_kbps = -1;
 				m_state      = OutputState::FailedHard;
 				m_last_error = "Max reconnect attempts reached";
 			}
