@@ -109,6 +109,8 @@ Building from source is **only** for contributors who want to modify the code â€
 
 ## Broadcast Hub (v2 development on main)
 
+The OBS dock is fully resizable: it can live on the left, right, bottom, or as a floating window without forcing OBS's preview or neighboring docks to a minimum width/height. Hub content scrolls when space is constrained, and Configure/Health can shrink independently.
+
 The first v2 slice is now under development in the `Hub` tab:
 
 - **YouTube stays native in OBS**: the Hub uses Google OAuth (desktop loopback + PKCE), finds the reusable YouTube Live stream whose stream key matches the one already configured in OBS, creates the scheduled broadcast and binds it to that existing stream. No duplicate YouTube encoder/output is created. Native OBS service detection is deferred until `OBS_FRONTEND_EVENT_FINISHED_LOADING` so the plugin never queries the streaming output during module startup.
