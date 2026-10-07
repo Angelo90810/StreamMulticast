@@ -16,6 +16,7 @@ GPLv2 — see LICENSE for full text.
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QFileDialog>
 #include <QtCore/QFileInfo>
+#include <QtCore/QUrl>
 
 namespace smulti {
 
@@ -308,7 +309,8 @@ Endpoint EndpointDialog::collect_from_form() const
 	Endpoint ep = m_endpoint;
 	ep.name = m_name_edit->text().trimmed().toStdString();
 	ep.server_url = m_server_edit->text().trimmed().toStdString();
-	ep.stream_key = m_key_edit->text().trimmed().toStdString();
+	/* Validate with trimmed() but preserve the exact key bytes entered. */
+	ep.stream_key = m_key_edit->text().toStdString();
 
 	ep.video_settings_mode = static_cast<EncoderSettingsMode>(
 		m_video_mode_cb->currentData().toInt());
@@ -470,6 +472,15 @@ void EndpointDialog::on_save()
 	}
 	if (m_key_edit->text().trimmed().isEmpty()) {
 		QMessageBox::warning(this, tr("Validation"), tr("Please enter a stream key."));
+		return;
+	}
+
+	const QUrl server_url(m_server_edit->text().trimmed());
+	const QString scheme = server_url.scheme().toLower();
+	if (!server_url.isValid() || (scheme != "rtmp" && scheme != "rtmps")) {
+		QMessageBox::warning(
+			this, tr("Validation"),
+			tr("Server URL must be a valid rtmp:// or rtmps:// address."));
 		return;
 	}
 
