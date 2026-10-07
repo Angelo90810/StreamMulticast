@@ -148,11 +148,24 @@ bool OutputController::has_active_session() const
 void OutputController::retire()
 {
 	m_retired.store(true);
+	m_start_blocked.store(true);
 	m_stop_reconnect.store(true);
+}
+
+void OutputController::block_start()
+{
+	m_start_blocked.store(true);
+}
+
+void OutputController::unblock_start()
+{
+	if (!m_retired.load() && !m_shutdown_done.load())
+		m_start_blocked.store(false);
 }
 
 void OutputController::begin_handoff_wait()
 {
+	m_start_blocked.store(true);
 	std::lock_guard<std::mutex> lock(m_mutex);
 	if (!m_output && m_state == OutputState::Idle)
 		m_state = OutputState::Stopping;
@@ -160,9 +173,12 @@ void OutputController::begin_handoff_wait()
 
 void OutputController::finish_handoff_wait()
 {
+	if (m_retired.load() || m_shutdown_done.load())
+		return;
+
+	m_start_blocked.store(false);
 	std::lock_guard<std::mutex> lock(m_mutex);
-	if (!m_retired.load() && !m_shutdown_done.load() &&
-	    !m_output && m_state == OutputState::Stopping)
+	if (!m_output && m_state == OutputState::Stopping)
 		m_state = OutputState::Idle;
 }
 
