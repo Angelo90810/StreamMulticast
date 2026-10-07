@@ -332,6 +332,28 @@ void ConfigTab::on_list_reorder()
 
 void ConfigTab::refresh_runtime_states()
 {
+	/* Controller-level requests come from OBS frontend events that may land
+	 * while an asynchronous stop/handoff is still in progress. Consume them
+	 * here on the Qt UI thread once the controller is ready. */
+	for (const auto &ep : m_registry.all()) {
+		auto ctrl = m_registry.controller_for(ep.id);
+		if (!ctrl || !ctrl->start_requested())
+			continue;
+		if (!ep.enabled) {
+			ctrl->cancel_start_request();
+			continue;
+		}
+		if (ctrl->start_blocked() || ctrl->state() == OutputState::Stopping)
+			continue;
+
+		if (ep.linked_to_main && !obs_frontend_streaming_active()) {
+			ctrl->cancel_start_request();
+			continue;
+		}
+
+		ctrl->request_start_when_ready();
+	}
+
 	/* Resolve deferred starts on the Qt thread. The controller's handoff gate
 	 * becomes Idle only after ControllerReaper has fully destroyed older
 	 * outputs, so this cannot briefly double-stream after a live edit. */
