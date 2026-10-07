@@ -34,18 +34,17 @@ HealthSampler::~HealthSampler()
  * ----------------------------------------------------------------------- */
 void HealthSampler::start()
 {
-	if (m_running.load())
+	bool expected = false;
+	if (!m_running.compare_exchange_strong(expected, true))
 		return;
-	m_running.store(true);
 	m_thread = std::thread(&HealthSampler::poll_loop, this);
 	obs_log(LOG_INFO, "HealthSampler: started (2 Hz)");
 }
 
 void HealthSampler::stop()
 {
-	if (!m_running.load())
+	if (!m_running.exchange(false))
 		return;
-	m_running.store(false);
 	if (m_thread.joinable())
 		m_thread.join();
 	obs_log(LOG_INFO, "HealthSampler: stopped");
