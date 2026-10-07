@@ -12,6 +12,7 @@ GPLv2 — see LICENSE for full text.
 
 #include <algorithm>
 #include <cassert>
+#include <unordered_set>
 
 namespace smulti {
 
@@ -29,10 +30,25 @@ EndpointRegistry::EndpointRegistry(ConfigStore &store, ControllerReaper &reaper)
 		          return a.sort_order < b.sort_order;
 	          });
 
+	bool repaired_ids = false;
+	std::unordered_set<std::string> seen_ids;
 	for (auto &ep : loaded) {
+		if (ep.id.empty() || !seen_ids.insert(ep.id).second) {
+			const std::string old_id = ep.id;
+			do {
+				ep.id = Endpoint::generate_uuid();
+			} while (!seen_ids.insert(ep.id).second);
+			repaired_ids = true;
+			obs_log(LOG_WARNING,
+			        "EndpointRegistry: repaired duplicate/empty endpoint id '%s' -> '%s'",
+			        old_id.c_str(), ep.id.c_str());
+		}
 		m_controllers[ep.id] = std::make_shared<OutputController>(ep, m_reaper);
 		m_endpoints.push_back(std::move(ep));
 	}
+
+	if (repaired_ids)
+		m_store.schedule_save(m_endpoints);
 
 	obs_log(LOG_INFO, "EndpointRegistry: initialised with %zu endpoints", m_endpoints.size());
 }
@@ -70,14 +86,14 @@ std::vector<Endpoint> EndpointRegistry::all() const
 	return m_endpoints;
 }
 
-const Endpoint *EndpointRegistry::find(const std::string &id) const
+std::optional<Endpoint> EndpointRegistry::find(const std::string &id) const
 {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	for (const auto &ep : m_endpoints) {
 		if (ep.id == id)
-			return &ep;
+			return ep;
 	}
-	return nullptr;
+	return std::nullopt;
 }
 
 std::shared_ptr<OutputController> EndpointRegistry::controller_for(const std::string &id)
@@ -98,10 +114,21 @@ size_t EndpointRegistry::count() const
  * ----------------------------------------------------------------------- */
 void EndpointRegistry::add(Endpoint ep)
 {
-	/* Assign sort order */
+	/* Assign identity/order under the same lock so a malformed import cannot
+	 * create duplicate UUIDs and alias two endpoints to one controller. */
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-		int max_order = 0;
+		auto id_exists = [&](const std::string &id) {
+			return std::any_of(m_endpoints.begin(), m_endpoints.end(),
+			                   [&](const Endpoint &e) { return e.id == id; });
+		};
+		if (ep.id.empty() || id_exists(ep.id)) {
+			do {
+				ep.id = Endpoint::generate_uuid();
+			} while (id_exists(ep.id));
+		}
+
+		int max_order = -1;
 		for (const auto &e : m_endpoints)
 			max_order = std::max(max_order, e.sort_order);
 		ep.sort_order = max_order + 1;
@@ -143,9 +170,16 @@ void EndpointRegistry::update(const Endpoint &ep)
 		 * whether the NEW controller gets started afterward. */
 		auto ctrl_it = m_controllers.find(ep.id);
 		if (ctrl_it != m_controllers.end()) {
-			was_running = ctrl_it->second->is_running();
+			OutputState old_state = ctrl_it->second->state();
+			was_running = old_state == OutputState::Live ||
+			              old_state == OutputState::Starting ||
+			              old_state == OutputState::Reconnecting;
 			old_ctrl = std::move(ctrl_it->second);
 			ctrl_it->second = std::make_shared<OutputController>(ep, m_reaper);
+		} else {
+			/* Self-heal a partially corrupted registry instead of leaving an
+			 * endpoint permanently without a controller. */
+			m_controllers[ep.id] = std::make_shared<OutputController>(ep, m_reaper);
 		}
 	}
 
@@ -228,15 +262,30 @@ void EndpointRegistry::reorder(const std::vector<std::string> &ordered_ids)
 	std::vector<Endpoint> updated;
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-		for (int i = 0; i < static_cast<int>(ordered_ids.size()); ++i) {
+		std::unordered_set<std::string> seen;
+		int next_order = 0;
+
+		/* Apply valid unique ids supplied by the UI first. */
+		for (const auto &id : ordered_ids) {
+			if (!seen.insert(id).second)
+				continue;
 			auto it = std::find_if(m_endpoints.begin(), m_endpoints.end(),
-			                       [&](const Endpoint &e) { return e.id == ordered_ids[i]; });
+			                       [&](const Endpoint &e) { return e.id == id; });
 			if (it != m_endpoints.end()) {
-				it->sort_order = i;
+				it->sort_order = next_order++;
 				updated.push_back(*it);
 			}
 		}
-		/* Re-sort the internal list */
+
+		/* Never lose/duplicate order values if a caller supplied a partial
+		 * or stale list. Append every unmentioned endpoint deterministically. */
+		for (auto &ep : m_endpoints) {
+			if (seen.insert(ep.id).second) {
+				ep.sort_order = next_order++;
+				updated.push_back(ep);
+			}
+		}
+
 		std::sort(m_endpoints.begin(), m_endpoints.end(),
 		          [](const Endpoint &a, const Endpoint &b) {
 			          return a.sort_order < b.sort_order;
