@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   PLUGIN_NAME: StreamMulticast
 
@@ -37,10 +41,25 @@ jobs:
           arch: x64
 
       - name: Configure CMake
-        run: cmake --preset windows-x64
+        run: cmake --preset windows-ci-x64
 
       - name: Build
-        run: cmake --build --preset windows-x64 --config ${{ matrix.config }}
+        run: cmake --build --preset windows-ci-x64 --config ${{ matrix.config }}
+
+      - name: Validate TikTok bridge script
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path "tools/tiktok-bridge/StreamMulticast.TikTokBridge.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
 
       - name: Stage artifact
         shell: pwsh
@@ -65,11 +84,23 @@ jobs:
   release:
     name: Publish Release
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.head_commit.message == 'publish-v1.1.0'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'publish-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Read release metadata
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(jq -r '.version' buildspec.json)
+          OBS_VERSION=$(jq -r '.dependencies["obs-studio"].version' buildspec.json)
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "name=StreamMulticast v$VERSION - OBS $OBS_VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -86,8 +117,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.0
-          name: StreamMulticast v1.1.0 - OBS 32.2.2
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
           target_commitish: ${{ github.sha }}
           files: '*.zip'
           generate_release_notes: true
