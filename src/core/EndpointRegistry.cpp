@@ -13,6 +13,7 @@ GPLv2 — see LICENSE for full text.
 #include <algorithm>
 #include <cassert>
 #include <unordered_set>
+#include <obs.h>
 
 namespace smulti {
 
@@ -71,6 +72,7 @@ EndpointRegistry::~EndpointRegistry()
 	 * and cheap when already stopped, so calling it here unconditionally is
 	 * safe regardless of what the caller already did. */
 	for (auto &pair : m_controllers) {
+		pair.second->retire();
 		pair.second->stop();
 		m_reaper.enqueue(std::move(pair.second));
 	}
@@ -181,6 +183,7 @@ void EndpointRegistry::update(const Endpoint &ep)
 	}
 
 	if (old_ctrl) {
+		old_ctrl->retire();
 		/* stop() is cheap and non-blocking now (see OutputController's
 		 * detach-and-reaper rule) — call it unconditionally rather than only
 		 * when connection settings changed.  The old code's conn_changed
@@ -196,10 +199,29 @@ void EndpointRegistry::update(const Endpoint &ep)
 	}
 
 	if (was_running) {
-		/* Restart outside the lock */
+		/* Do not start the replacement until the reaper has fully destroyed
+		 * the old RTMP output/encoders. Starting immediately after stop()
+		 * used to create a short double-stream / double-NVENC window.
+		 *
+		 * The new controller is pinned by the queued task. If it gets
+		 * replaced/removed again before the UI callback executes, retire()
+		 * makes start() a harmless no-op. */
 		auto ctrl = controller_for(ep.id);
-		if (ctrl)
-			ctrl->start();
+		if (ctrl) {
+			m_reaper.enqueue([ctrl]() {
+				auto *holder = new std::shared_ptr<OutputController>(ctrl);
+				obs_queue_task(
+					OBS_TASK_UI,
+					[](void *param) {
+						std::unique_ptr<std::shared_ptr<OutputController>> p(
+							static_cast<std::shared_ptr<OutputController> *>(param));
+						if (*p)
+							(*p)->start();
+					},
+					holder,
+					false);
+			});
+		}
 	}
 
 	notify_observers(ChangeKind::Updated, ep);
@@ -237,6 +259,7 @@ void EndpointRegistry::remove(const std::string &id)
 	}
 
 	if (old_ctrl) {
+		old_ctrl->retire();
 		/* stop() is cheap and non-blocking now — call it unconditionally
 		 * (previously gated on is_running(), which excludes Reconnecting;
 		 * that gap let a Reconnecting controller reach the reaper's
