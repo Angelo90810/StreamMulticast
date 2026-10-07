@@ -1,0 +1,115 @@
+; StreamMulticast Windows installer.
+; OBS discovery/version validation follows the proven pattern used by Source Dock:
+; https://github.com/exeldro/obs-source-dock
+; Source Dock is GPL-2.0; StreamMulticast is GPL-2.0-or-later.
+
+#define MyAppName "@PLUGIN_DISPLAY_NAME@"
+#define MyAppVersion "@CMAKE_PROJECT_VERSION@"
+#define MyAppPublisher "@PLUGIN_AUTHOR@"
+#define MyAppURL "@PLUGIN_WEBSITE@"
+
+[Setup]
+AppId={{@UUID_APP@}}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL="https://github.com/Angelo90810/StreamMulticast/issues"
+AppUpdatesURL="https://github.com/Angelo90810/StreamMulticast/releases"
+DefaultDirName={code:GetObsDir}
+AppendDefaultDirName=no
+DirExistsWarning=no
+DisableProgramGroupPage=yes
+AllowNoIcons=yes
+OutputBaseFilename=StreamMulticast-{#MyAppVersion}-Windows-Installer
+Compression=lzma
+SolidCompression=yes
+WizardStyle=modern
+WizardResizable=yes
+PrivilegesRequired=admin
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+CloseApplications=yes
+RestartApplications=no
+LicenseFile="..\LICENSE"
+UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon="{app}\bin\64bit\obs64.exe"
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription="StreamMulticast plugin installer for OBS Studio"
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
+
+[Files]
+Source: "..\stage\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Code]
+function GetObsDir(Param: string): string;
+var
+  InstallPath: string;
+begin
+  Result := ExpandConstant('{pf}\obs-studio');
+
+  if RegQueryStringValue(HKLM32, 'SOFTWARE\OBS Studio', '', InstallPath) then
+    Result := InstallPath;
+
+  if RegQueryStringValue(HKLM64, 'SOFTWARE\OBS Studio', '', InstallPath) then
+    Result := InstallPath;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  ObsFileName: string;
+  ObsMS, ObsLS: Cardinal;
+  ObsMajorVersion: Cardinal;
+begin
+  Result := True;
+
+  if CurPageID <> wpSelectDir then
+    Exit;
+
+  ObsFileName := ExpandConstant('{app}\bin\64bit\obs64.exe');
+
+  if not FileExists(ObsFileName) then
+  begin
+    MsgBox(
+      'O OBS Studio não foi encontrado nessa pasta.' + #13#10 + #13#10 +
+      'Selecione a pasta raiz do OBS, normalmente:' + #13#10 +
+      'C:\Program Files\obs-studio',
+      mbError,
+      MB_OK
+    );
+    Result := False;
+    Exit;
+  end;
+
+  Result := GetVersionNumbers(ObsFileName, ObsMS, ObsLS);
+  if not Result then
+  begin
+    MsgBox(
+      'Não foi possível verificar a versão do OBS Studio em:' + #13#10 +
+      ObsFileName,
+      mbError,
+      MB_OK
+    );
+    Exit;
+  end;
+
+  ObsMajorVersion := ObsMS shr 16;
+  if ObsMajorVersion < 32 then
+  begin
+    MsgBox(
+      'Esta versão do StreamMulticast requer OBS Studio 32 ou superior.' + #13#10 +
+      'Build validado: OBS Studio 32.2.2.',
+      mbError,
+      MB_OK
+    );
+    Result := False;
+    Exit;
+  end;
+end;

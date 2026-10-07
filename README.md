@@ -1,6 +1,6 @@
 # StreamMulticast
 
-**Current audited release:** v1.1.2 for OBS Studio 32.2.2 (Windows x64).
+**Current release:** v1.1.3 for OBS Studio 32.2.2 (Windows x64).
 
 > Multi-destination streaming for OBS Studio on **Windows x64** — **per-output bitrate**, **per-output orientation** (horizontal + vertical in parallel), free, open-source, no account, no cloud.
 
@@ -84,14 +84,25 @@ All three run **at the same time**, from the same OBS scene.
 
 ---
 
-## Installation (30 seconds)
+## Installation
 
-1. Download the latest `StreamMulticast-Windows-x64.zip` from the [Releases page](https://github.com/Angelo90810/StreamMulticast/releases)
-2. Close OBS if it's running
-3. Extract the ZIP into your OBS install — typically `C:\Program Files\obs-studio\` (the ZIP mirrors `obs-plugins\64bit\` and `data\obs-plugins\streammulticast\` so it merges cleanly)
-4. Start OBS, then **View → Docks → Multistream**
+### Windows installer — recommended
 
-That's it. Building from source is **only** for contributors who want to modify the code — see the [collapsed section at the bottom](#build-from-source-contributors-only).
+1. Download the latest `StreamMulticast-<version>-Windows-Installer.exe` from the [Releases page](https://github.com/Angelo90810/StreamMulticast/releases)
+2. Close OBS if it is running
+3. Run the installer as administrator
+4. The installer detects the OBS Studio folder from the Windows Registry, validates that `obs64.exe` exists and requires OBS Studio 32+
+5. Start OBS, then open **View → Docks → Multistream**
+
+No manual file copying is required. The installer also registers StreamMulticast in **Installed apps / Add or remove programs**, so uninstalling the plugin does not require hunting DLLs by hand.
+
+The Windows installer follows the established OBS plugin packaging pattern used by [Source Dock](https://github.com/exeldro/obs-source-dock), adapted for StreamMulticast and validated in CI.
+
+### ZIP — manual/portable fallback
+
+A ZIP is still published for portable OBS installations or manual deployment. Close OBS and extract `StreamMulticast-windows-x64-RelWithDebInfo.zip` directly into the OBS root folder, typically `C:\Program Files\obs-studio\`.
+
+Building from source is **only** for contributors who want to modify the code — see the [collapsed section at the bottom](#build-from-source-contributors-only).
 
 ---
 
@@ -125,7 +136,7 @@ A minimal Windows companion script lives in `tools/tiktok-bridge/`. It can write
 
 ## Build from source (contributors only)
 
-> **You probably don't need this.** End users should use the pre-built ZIP from [Releases](https://github.com/Angelo90810/StreamMulticast/releases) — see [Installation](#installation-30-seconds) above. This section exists for people who want to modify the code, audit it, or build for an unsupported platform.
+> **You probably don't need this.** End users should use the pre-built Windows installer from [Releases](https://github.com/Angelo90810/StreamMulticast/releases) — see [Installation](#installation) above. This section exists for people who want to modify the code, audit it, or build for an unsupported platform.
 
 <details>
 <summary><strong>Show build instructions</strong></summary>
@@ -155,7 +166,7 @@ Output: `build_x64\RelWithDebInfo\streammulticast.dll` (≈230 KB). The install 
 
 ### CI
 
-GitHub Actions builds the currently supported target, **Windows x64**, on every push to `main`. It runs the C++ core regression suite, validates the TikTok bridge helper, checks the installable OBS package layout, and publishes a release from an explicit `publish-v*` commit after the build succeeds. Third-party Actions are pinned to immutable commit SHAs. macOS/Linux presets remain contributor scaffolding and are not advertised as supported builds.
+GitHub Actions builds the currently supported target, **Windows x64**, on every push to `main`. It runs the C++ core regression suite, validates the TikTok bridge helper, checks the OBS package layout, builds a Source Dock-style Inno Setup installer plus ZIP fallback, generates SHA-256 checksums, and publishes a release from an explicit `publish-v*` commit after the build succeeds. Third-party Actions are pinned to immutable commit SHAs. macOS/Linux presets remain contributor scaffolding and are not advertised as supported builds.
 
 </details>
 

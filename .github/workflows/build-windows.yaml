@@ -34,7 +34,6 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
@@ -49,10 +48,6 @@ jobs:
       - name: Run core regression tests
         shell: pwsh
         run: |
-          # The test executable links against libobs from the downloaded OBS
-          # dependency tree. Visual Studio can link it without the runtime DLL
-          # being on PATH, but CTest cannot launch it unless Windows can resolve
-          # that DLL and its sibling dependencies.
           $dllDirs = Get-ChildItem -Path ".deps" -Recurse -File -Filter "*.dll" |
             ForEach-Object { $_.DirectoryName } |
             Sort-Object -Unique
@@ -116,7 +111,7 @@ jobs:
             throw "TikTok bridge DPAPI round-trip failed"
           }
 
-      - name: Stage artifact
+      - name: Stage OBS plugin package
         shell: pwsh
         run: |
           $stage = "stage"
@@ -133,7 +128,8 @@ jobs:
         run: |
           $required = @(
             "stage/obs-plugins/64bit/${{ env.PLUGIN_NAME }}.dll",
-            "stage/data/obs-plugins/${{ env.PLUGIN_NAME }}/locale/en-US.ini"
+            "stage/data/obs-plugins/${{ env.PLUGIN_NAME }}/locale/en-US.ini",
+            "build_x64/installer-Windows.generated.iss"
           )
           foreach ($path in $required) {
             if (-not (Test-Path -LiteralPath $path)) {
@@ -144,11 +140,53 @@ jobs:
             throw "Invalid extra plugin root directory in package: stage/${{ env.PLUGIN_NAME }}"
           }
 
-      - name: Upload artifact
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer and ZIP
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath "buildspec.json" -Raw | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+
+          $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path -LiteralPath $iscc)) {
+            throw "Inno Setup compiler not found"
+          }
+
+          $dist = (Resolve-Path "dist").Path
+          & $iscc "build_x64/installer-Windows.generated.iss" "/O$dist"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup failed with exit code $LASTEXITCODE"
+          }
+
+          Compress-Archive -Force -CompressionLevel Optimal `
+            -Path "stage/*" `
+            -DestinationPath "dist/${{ env.PLUGIN_NAME }}-windows-x64-${{ matrix.config }}.zip"
+
+          $installer = "dist/StreamMulticast-$version-Windows-Installer.exe"
+          $zip = "dist/${{ env.PLUGIN_NAME }}-windows-x64-${{ matrix.config }}.zip"
+          foreach ($path in @($installer, $zip)) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Expected release asset was not generated: $path"
+            }
+            if ((Get-Item -LiteralPath $path).Length -le 0) {
+              throw "Generated release asset is empty: $path"
+            }
+          }
+
+          Get-FileHash -Algorithm SHA256 -Path "dist/*" |
+            ForEach-Object { Write-Host "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" }
+
+      - name: Upload release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ${{ env.PLUGIN_NAME }}-windows-x64-${{ matrix.config }}
-          path: stage/
+          name: StreamMulticast-release-assets
+          path: dist/*
           retention-days: 30
           if-no-files-found: error
 
@@ -172,18 +210,18 @@ jobs:
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "name=StreamMulticast v$VERSION - OBS $OBS_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Download artifacts
+      - name: Download release assets
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          path: artifacts
+          name: StreamMulticast-release-assets
+          path: release-assets
 
-      - name: Zip artifact
+      - name: Generate SHA-256 checksums
+        shell: bash
         run: |
-          cd artifacts
-          for dir in */; do
-            (cd "$dir" && zip -r "../../${dir%/}.zip" .)
-          done
-          cd ..
+          cd release-assets
+          sha256sum *.exe *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
@@ -191,7 +229,7 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.name }}
           target_commitish: ${{ github.sha }}
-          files: '*.zip'
+          files: release-assets/*
           generate_release_notes: true
           draft: false
           prerelease: false

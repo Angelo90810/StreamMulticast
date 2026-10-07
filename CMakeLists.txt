@@ -14,6 +14,14 @@ include(compilerconfig)
 include(defaults)
 include(helpers)
 
+if(WIN32)
+  configure_file(
+    cmake/windows/resources/installer-Windows.iss.in
+    "${CMAKE_CURRENT_BINARY_DIR}/installer-Windows.generated.iss"
+    @ONLY
+  )
+endif()
+
 add_library(${CMAKE_PROJECT_NAME} MODULE)
 
 # plugin-support static lib is auto-created by helpers_common.cmake from src/plugin-support.c.in
