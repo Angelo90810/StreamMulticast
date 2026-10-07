@@ -161,6 +161,24 @@ public:
 	bool has_active_session() const;
 
 	/**
+	 * True while this controller still owns output/service/encoder resources,
+	 * including an asynchronous Stopping teardown.  This is deliberately
+	 * broader than has_active_session(): FailedHard/Idle outputs can still
+	 * retain libobs/NVENC resources until fully reaped.
+	 */
+	bool has_session_resources() const;
+
+	/**
+	 * Request a start now or as soon as an asynchronous stop/handoff gate
+	 * finishes.  Used for OBS-linked auto-start so a rapid main-stream
+	 * stop→start cannot lose the only STREAMING_STARTED event.
+	 */
+	bool request_start_when_ready();
+
+	/** Cancel a deferred auto-start request (explicit/main stop wins). */
+	void cancel_start_request();
+
+	/**
 	 * Permanently retire this controller after the registry replaces/removes it.
 	 * A retired controller rejects future deferred/manual starts and aborts
 	 * reconnect work while its detached resources are being reaped.
@@ -279,7 +297,7 @@ private:
 
 	/** Assumes m_mutex is already held by the caller. */
 	void do_release_encoders_locked();
-	void do_create_output();
+	bool do_create_output();
 
 	/** Configure normal/stretch/rotated video source for a fresh encoder. */
 	bool configure_video_pipeline(obs_encoder_t *encoder);
@@ -322,6 +340,7 @@ private:
 	std::atomic<bool>   m_retired {false};
 	std::atomic<bool>   m_start_blocked {false};
 	std::atomic<bool>   m_enabled {true};
+	std::atomic<bool>   m_start_requested {false};
 
 	/** Guards shutdown_blocking() idempotency — set once, never reset. */
 	std::atomic<bool>   m_shutdown_done {false};
