@@ -34,7 +34,7 @@ namespace smulti {
  * Schema version is embedded in the JSON root so future migrations can detect
  * old formats.
  *
- * Current schema version: 2
+ * Current schema version: 3
  */
 class ConfigStore {
 public:
