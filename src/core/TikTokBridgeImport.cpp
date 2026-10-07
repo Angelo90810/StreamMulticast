@@ -6,6 +6,7 @@ GPLv2 — see LICENSE for full text.
 */
 
 #include "TikTokBridgeImport.hpp"
+#include "SecretStore.hpp"
 #include "../plugin-support.h"
 
 #include <obs-data.h>
@@ -62,7 +63,19 @@ TikTokBridgeConfig import_tiktok_bridge_file(const std::string &path)
 	cfg.name = name ? name : "";
 	cfg.expires_at = expires_at ? expires_at : "";
 	cfg.server_url = read_string_alias(data, "server_url", "server");
-	cfg.stream_key = read_string_alias(data, "stream_key", "key");
+
+	const char *protected_key = obs_data_get_string(data, "stream_key_protected");
+	if (protected_key && *protected_key) {
+		if (!unprotect_secret(protected_key, cfg.stream_key)) {
+			obs_data_release(data);
+			cfg.error_message =
+				"TikTok Bridge stream key is protected for another Windows user or is corrupted";
+			return cfg;
+		}
+	} else {
+		/* Legacy / third-party helper compatibility. */
+		cfg.stream_key = read_string_alias(data, "stream_key", "key");
+	}
 
 	obs_data_release(data);
 
