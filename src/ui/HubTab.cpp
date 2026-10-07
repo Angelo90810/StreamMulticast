@@ -310,6 +310,13 @@ void HubTab::on_youtube_authenticated(const QString &access_token,
 void HubTab::on_youtube_access_refreshed(const QString &access_token)
 {
 	m_youtube_access_token = access_token;
+
+	if (m_youtube_prepare_pending) {
+		m_youtube_prepare_pending = false;
+		prepare_youtube_with_current_token();
+		return;
+	}
+
 	m_youtube_status->setText(tr("✓ YouTube authorization restored. Loading channel..."));
 	m_youtube.fetch_channel(access_token);
 }
@@ -329,6 +336,42 @@ void HubTab::prepare_youtube()
 {
 	save_state();
 
+	const HubState &state = m_config.state();
+	if (state.plan.title.empty()) {
+		QMessageBox::warning(
+			this, tr("Broadcast Hub"),
+			tr("Enter a broadcast title first."));
+		return;
+	}
+
+	if (!state.youtube_refresh_token.empty() && !state.youtube_client_id.empty()) {
+		request_fresh_youtube_token_for_prepare();
+		return;
+	}
+
+	if (m_youtube_access_token.isEmpty()) {
+		QMessageBox::warning(
+			this, tr("Broadcast Hub"),
+			tr("Connect YouTube in the Hub first."));
+		return;
+	}
+
+	prepare_youtube_with_current_token();
+}
+
+void HubTab::request_fresh_youtube_token_for_prepare()
+{
+	const HubState &state = m_config.state();
+	m_youtube_prepare_pending = true;
+	m_youtube_status->setStyleSheet(QString());
+	m_youtube_status->setText(tr("Refreshing YouTube authorization before preparing the event..."));
+	m_youtube.refresh_access_token(
+		QString::fromStdString(state.youtube_client_id),
+		QString::fromStdString(state.youtube_refresh_token));
+}
+
+void HubTab::prepare_youtube_with_current_token()
+{
 	if (m_youtube_access_token.isEmpty()) {
 		QMessageBox::warning(
 			this, tr("Broadcast Hub"),
@@ -345,21 +388,13 @@ void HubTab::prepare_youtube()
 		return;
 	}
 
-	const HubState &state = m_config.state();
-	if (state.plan.title.empty()) {
-		QMessageBox::warning(
-			this, tr("Broadcast Hub"),
-			tr("Enter a broadcast title first."));
-		return;
-	}
-
 	m_youtube_status->setStyleSheet(QString());
 	m_youtube_status->setText(
 		tr("Finding the reusable YouTube stream already configured in OBS..."));
 	m_youtube.prepare_native_obs_broadcast(
 		m_youtube_access_token,
 		QString::fromStdString(stream_key),
-		state.plan);
+		m_config.state().plan);
 }
 
 void HubTab::on_youtube_broadcast_prepared(const QString &broadcast_id,
@@ -378,6 +413,7 @@ void HubTab::on_youtube_broadcast_prepared(const QString &broadcast_id,
 
 void HubTab::on_youtube_error(const QString &message)
 {
+	m_youtube_prepare_pending = false;
 	m_youtube_status->setText(tr("YouTube error: %1").arg(message));
 	m_youtube_status->setStyleSheet(QStringLiteral("color: #e74c3c;"));
 }
@@ -391,7 +427,12 @@ void HubTab::prepare_connected_destinations()
 	}
 
 	bool attempted = false;
-	if (!m_youtube_access_token.isEmpty()) {
+	const HubState &state = m_config.state();
+
+	if (!state.youtube_refresh_token.empty() && !state.youtube_client_id.empty()) {
+		attempted = true;
+		request_fresh_youtube_token_for_prepare();
+	} else if (!m_youtube_access_token.isEmpty()) {
 		std::string stream_key;
 		QString service;
 		if (youtube_native_config(stream_key, service)) {
@@ -400,11 +441,11 @@ void HubTab::prepare_connected_destinations()
 			m_youtube.prepare_native_obs_broadcast(
 				m_youtube_access_token,
 				QString::fromStdString(stream_key),
-				m_config.state().plan);
+				state.plan);
 		}
 	}
 
-	const HubState &state = m_config.state();
+
 	if (!state.facebook_page_id.empty() && !state.facebook_page_token.empty()) {
 		attempted = true;
 		m_facebook_status->setText(tr("Preparing Facebook..."));

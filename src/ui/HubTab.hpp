@@ -58,6 +58,8 @@ private:
 	BroadcastPlan collect_plan() const;
 	void save_state();
 	void upsert_facebook_endpoint(const QString &secure_url);
+	void prepare_youtube_with_current_token();
+	void request_fresh_youtube_token_for_prepare();
 	bool youtube_native_config(std::string &stream_key, QString &service_name) const;
 
 	EndpointRegistry &m_registry;
@@ -65,6 +67,7 @@ private:
 	YouTubeClient m_youtube;
 	FacebookClient m_facebook;
 	QString m_youtube_access_token;
+	bool m_youtube_prepare_pending{false};
 
 	QLineEdit *m_title_edit{nullptr};
 	QPlainTextEdit *m_description_edit{nullptr};
