@@ -396,6 +396,8 @@ void OutputController::do_create_output()
  * ----------------------------------------------------------------------- */
 bool OutputController::start()
 {
+	std::lock_guard<std::mutex> lifecycle_lock(m_lifecycle_mutex);
+
 	if (!m_endpoint.enabled || m_shutdown_done.load()) {
 		obs_log(LOG_WARNING, "OutputController [%s]: start ignored because endpoint is disabled",
 		        m_endpoint.name.c_str());
@@ -538,6 +540,8 @@ bool OutputController::start()
  * ----------------------------------------------------------------------- */
 void OutputController::stop()
 {
+	std::lock_guard<std::mutex> lifecycle_lock(m_lifecycle_mutex);
+
 	/* Flag any in-flight reconnect to abort — checked by
 	 * reconnect_thread_func()'s poll loop and its session-validity guards. */
 	m_stop_reconnect.store(true);
@@ -667,6 +671,8 @@ void OutputController::stop()
  * ----------------------------------------------------------------------- */
 void OutputController::shutdown_blocking()
 {
+	std::lock_guard<std::mutex> lifecycle_lock(m_lifecycle_mutex);
+
 	bool expected = false;
 	if (!m_shutdown_done.compare_exchange_strong(expected, true))
 		return; // already torn down (or another caller is doing it)
