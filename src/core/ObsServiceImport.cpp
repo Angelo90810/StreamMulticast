@@ -25,8 +25,10 @@ namespace smulti {
  * but for v1.0.6 we hardcode the major ones to avoid having to parse
  * OBS's data folder.  Unknown services fall through with an error.
  *
- * Servers are taken from OBS's services.json (rtmp_common service type)
- * as of OBS 31.x.
+ * Keep this fallback deliberately small and limited to stable entries from
+ * OBS's current services.json. Transient/provider-specific hosts (for example
+ * Kick ingest hosts) are intentionally not guessed here; the live OBS service
+ * object remains the authoritative source when available.
  * ----------------------------------------------------------------------- */
 static std::string resolve_service_server(const std::string &service_name)
 {
@@ -36,8 +38,6 @@ static std::string resolve_service_server(const std::string &service_name)
 		return "rtmps://a.rtmps.youtube.com:443/live2";
 	if (service_name == "Facebook Live")
 		return "rtmps://rtmp-api.facebook.com:443/rtmp/";
-	if (service_name == "Kick")
-		return "rtmps://fa723fc1b171.global-contribute.live-video.net/app";
 	if (service_name == "Trovo")
 		return "rtmp://livepush.trovo.live/live/";
 	if (service_name == "Restream.io - RTMP")
