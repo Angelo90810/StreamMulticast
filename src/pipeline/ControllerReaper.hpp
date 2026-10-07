@@ -71,11 +71,10 @@ public:
 	 * below).  Safe to call from the Qt UI thread — this only ever takes a
 	 * short lock, never blocks on the job itself.
 	 *
-	 * If called after shutdown() has already been requested (a stray
-	 * caller racing the tail end of obs_module_unload), the job runs
-	 * synchronously on the calling thread instead of being silently dropped
-	 * — by that point in the plugin's lifecycle everything is already
-	 * tearing down, so this is an acceptable, rare fallback.
+	 * Normal callers cannot observe a shut-down Reaper: shutdown() is private
+	 * and begins only in the destructor after all producers are destroyed.
+	 * The implementation still has a last-resort synchronous fallback for a
+	 * lifetime violation so OBS resources are never silently leaked.
 	 */
 	void enqueue(std::function<void()> job);
 
@@ -86,15 +85,13 @@ public:
 	 */
 	void enqueue(std::shared_ptr<OutputController> controller);
 
+private:
 	/**
-	 * Signal the worker to drain the remaining queue and exit, then
-	 * block-join it.  Idempotent — safe to call more than once (or not at
-	 * all; the destructor calls it as a safety net).  Must be called from
-	 * obs_module_unload(), after all controllers have been enqueued.
+	 * Drain the queue and join the worker. Kept private so there is no
+	 * externally-visible "alive but already shut down" phase: destruction
+	 * begins only after every producer (Registry/UI/timers) has gone away.
 	 */
 	void shutdown();
-
-private:
 	void worker_loop();
 
 	std::mutex                         m_mutex;
