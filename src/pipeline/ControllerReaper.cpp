@@ -46,8 +46,8 @@ void ControllerReaper::enqueue(std::function<void()> job)
 	 * only happens for a stray caller racing the very tail of
 	 * obs_module_unload(), at which point the whole plugin is already
 	 * unwinding. */
-	obs_log(LOG_WARNING, "ControllerReaper: enqueue() after shutdown() — "
-	                      "running job synchronously on the caller's thread");
+	obs_log(LOG_ERROR, "ControllerReaper: enqueue() during destruction — "
+	                    "lifetime invariant violated; running teardown synchronously");
 	job();
 }
 
