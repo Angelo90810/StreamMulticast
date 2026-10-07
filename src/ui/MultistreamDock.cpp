@@ -41,6 +41,7 @@ void MultistreamDock::setup_ui()
 	setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
 
 	auto *layout = new QVBoxLayout(this);
+	layout->setSizeConstraint(QLayout::SetNoConstraint);
 	layout->setContentsMargins(4, 4, 4, 4);
 	layout->setSpacing(0);
 
@@ -51,6 +52,7 @@ void MultistreamDock::setup_ui()
 
 	auto *hub_scroll = new QScrollArea(m_tabs);
 	hub_scroll->setWidgetResizable(true);
+	hub_scroll->setSizeAdjustPolicy(QAbstractScrollArea::AdjustIgnored);
 	hub_scroll->setFrameShape(QFrame::NoFrame);
 	hub_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 	hub_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
