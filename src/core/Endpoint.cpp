@@ -78,13 +78,21 @@ obs_data_t *Endpoint::serialize() const
 	obs_data_set_string(data, "name", name.c_str());
 	obs_data_set_string(data, "server_url", server_url.c_str());
 
-	std::string protected_key;
-	if (protect_secret(stream_key, protected_key)) {
-		obs_data_set_string(data, "stream_key_protected", protected_key.c_str());
+	if (stream_key_decryption_failed && stream_key.empty() &&
+	    !preserved_protected_stream_key.empty()) {
+		/* Never destroy an opaque DPAPI blob merely because this Windows
+		 * account cannot decrypt it. */
+		obs_data_set_string(data, "stream_key_protected",
+		                    preserved_protected_stream_key.c_str());
 	} else {
-		/* Non-Windows compatibility path until native keychain backends are
-		 * implemented. Existing configs remain readable everywhere. */
-		obs_data_set_string(data, "stream_key", stream_key.c_str());
+		std::string protected_key;
+		if (protect_secret(stream_key, protected_key)) {
+			obs_data_set_string(data, "stream_key_protected", protected_key.c_str());
+		} else {
+			/* Non-Windows compatibility path until native keychain backends
+			 * are implemented. Existing configs remain readable everywhere. */
+			obs_data_set_string(data, "stream_key", stream_key.c_str());
+		}
 	}
 
 	obs_data_set_int(data, "video_settings_mode", static_cast<long long>(video_settings_mode));
@@ -117,10 +125,13 @@ Endpoint Endpoint::deserialize(obs_data_t *data)
 	if (obs_data_has_user_value(data, "stream_key_protected")) {
 		const char *protected_raw = obs_data_get_string(data, "stream_key_protected");
 		std::string decrypted;
-		if (protected_raw && unprotect_secret(protected_raw, decrypted))
+		if (protected_raw && unprotect_secret(protected_raw, decrypted)) {
 			ep.stream_key = std::move(decrypted);
-		else
+		} else {
 			ep.stream_key.clear();
+			ep.stream_key_decryption_failed = true;
+			ep.preserved_protected_stream_key = protected_raw ? protected_raw : "";
+		}
 	} else {
 		/* v1/v2 compatibility: plaintext keys migrate to protected storage
 		 * automatically on the next successful save on Windows. */
