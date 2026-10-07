@@ -58,8 +58,8 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 		for (auto &ep : g_registry->all()) {
 			if (ep.enabled && ep.linked_to_main) {
 				auto ctrl = g_registry->controller_for(ep.id);
-				if (ctrl && !ctrl->has_active_session())
-					ctrl->start();
+				if (ctrl)
+					ctrl->request_start_when_ready();
 			}
 		}
 	} else if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPED) {
@@ -67,8 +67,10 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 		for (auto &ep : g_registry->all()) {
 			if (ep.linked_to_main) {
 				auto ctrl = g_registry->controller_for(ep.id);
-				if (ctrl)
+				if (ctrl) {
+					ctrl->cancel_start_request();
 					ctrl->stop();
+				}
 			}
 		}
 	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED ||
@@ -160,8 +162,8 @@ bool obs_module_load()
 			if (!ep.enabled || !ep.linked_to_main)
 				continue;
 			auto ctrl = g_registry->controller_for(ep.id);
-			if (ctrl && !ctrl->has_active_session())
-				ctrl->start();
+			if (ctrl)
+				ctrl->request_start_when_ready();
 		}
 	}
 
