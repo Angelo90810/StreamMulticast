@@ -27,12 +27,13 @@ static std::string read_string_alias(obs_data_t *data,
 
 std::string default_tiktok_bridge_path()
 {
-	char buf[1024] = {};
-	int written = os_get_config_path(buf, sizeof(buf), "obs-studio");
-	if (written <= 0)
+	char *base = os_get_config_path_ptr("obs-studio");
+	if (!base)
 		return {};
 
-	return std::string(buf) + "/plugin_config/streammulticast/tiktok_bridge.json";
+	std::string path(base);
+	bfree(base);
+	return path + "/plugin_config/streammulticast/tiktok_bridge.json";
 }
 
 TikTokBridgeConfig import_tiktok_bridge_file(const std::string &path)
