@@ -170,10 +170,7 @@ void EndpointRegistry::update(const Endpoint &ep)
 		 * whether the NEW controller gets started afterward. */
 		auto ctrl_it = m_controllers.find(ep.id);
 		if (ctrl_it != m_controllers.end()) {
-			OutputState old_state = ctrl_it->second->state();
-			was_running = old_state == OutputState::Live ||
-			              old_state == OutputState::Starting ||
-			              old_state == OutputState::Reconnecting;
+			was_running = ctrl_it->second->has_active_session();
 			old_ctrl = std::move(ctrl_it->second);
 			ctrl_it->second = std::make_shared<OutputController>(ep, m_reaper);
 		} else {
