@@ -14,7 +14,6 @@ GPLv2 — see LICENSE for full text.
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QListWidgetItem>
 #include <QtCore/QMetaObject>
-#include <obs-frontend-api.h>
 
 namespace smulti {
 
@@ -222,11 +221,6 @@ void ConfigTab::on_add_endpoint()
 
 	const Endpoint result = dlg.result_endpoint();
 	m_registry.add(result);
-
-	/* Adding a linked endpoint while OBS is already live must not wait for a
-	 * future STREAMING_STARTED event that may be hours away. */
-	if (result.enabled && result.linked_to_main && obs_frontend_streaming_active())
-		m_pending_starts.insert(result.id);
 }
 
 void ConfigTab::on_edit_endpoint(const std::string &id)
@@ -235,35 +229,11 @@ void ConfigTab::on_edit_endpoint(const std::string &id)
 	if (!ep)
 		return;
 
-	auto before_ctrl = m_registry.controller_for(id);
-	const bool was_active = before_ctrl && before_ctrl->has_active_session();
-
 	EndpointDialog dlg(*ep, m_registry, this);
 	if (dlg.exec() != QDialog::Accepted)
 		return;
 
-	const Endpoint result = dlg.result_endpoint();
-	m_registry.update(result);
-
-	auto after_ctrl = m_registry.controller_for(id);
-	if (!after_ctrl || !result.enabled)
-		return;
-
-	/* If runtime settings changed while this endpoint was live, Registry
-	 * replaces the controller and gates it until old teardown completes.
-	 * Preserve the user's previous live intent without an unload-unsafe
-	 * queued callback. */
-	if (was_active && after_ctrl != before_ctrl) {
-		m_pending_starts.insert(id);
-		return;
-	}
-
-	/* Turning on linked-to-main while OBS is already streaming must take
-	 * effect immediately; there will be no new STREAMING_STARTED event. */
-	if (result.linked_to_main && obs_frontend_streaming_active() &&
-	    !after_ctrl->has_active_session()) {
-		m_pending_starts.insert(id);
-	}
+	m_registry.update(dlg.result_endpoint());
 }
 
 void ConfigTab::on_toggle_endpoint(const std::string &id, bool enabled)
@@ -275,16 +245,6 @@ void ConfigTab::on_toggle_endpoint(const std::string &id, bool enabled)
 	Endpoint updated = *ep;
 	updated.enabled = enabled;
 	m_registry.update(updated);
-
-	if (!enabled) {
-		m_pending_starts.erase(id);
-		return;
-	}
-
-	/* Enabling an auto-linked endpoint while the OBS stream is already live
-	 * should start it as soon as any previous asynchronous stop finishes. */
-	if (updated.linked_to_main && obs_frontend_streaming_active())
-		m_pending_starts.insert(id);
 }
 
 void ConfigTab::on_manual_start_stop(const std::string &id)
@@ -332,61 +292,6 @@ void ConfigTab::on_list_reorder()
 
 void ConfigTab::refresh_runtime_states()
 {
-	/* Controller-level requests come from OBS frontend events that may land
-	 * while an asynchronous stop/handoff is still in progress. Consume them
-	 * here on the Qt UI thread once the controller is ready. */
-	for (const auto &ep : m_registry.all()) {
-		auto ctrl = m_registry.controller_for(ep.id);
-		if (!ctrl || !ctrl->start_requested())
-			continue;
-		if (!ep.enabled) {
-			ctrl->cancel_start_request();
-			continue;
-		}
-		if (ctrl->start_blocked() || ctrl->state() == OutputState::Stopping)
-			continue;
-
-		if (ep.linked_to_main && !obs_frontend_streaming_active()) {
-			ctrl->cancel_start_request();
-			continue;
-		}
-
-		ctrl->request_start_when_ready();
-	}
-
-	/* Resolve deferred starts on the Qt thread. The controller's handoff gate
-	 * becomes Idle only after ControllerReaper has fully destroyed older
-	 * outputs, so this cannot briefly double-stream after a live edit. */
-	for (auto it = m_pending_starts.begin(); it != m_pending_starts.end();) {
-		auto ep = m_registry.find(*it);
-		auto ctrl = m_registry.controller_for(*it);
-
-		if (!ep || !ctrl || !ep->enabled) {
-			it = m_pending_starts.erase(it);
-			continue;
-		}
-
-		if (ctrl->start_blocked() || ctrl->state() == OutputState::Stopping) {
-			++it;
-			continue;
-		}
-
-		if (ctrl->has_active_session()) {
-			it = m_pending_starts.erase(it);
-			continue;
-		}
-
-		const bool should_start =
-			!ep->linked_to_main || obs_frontend_streaming_active();
-
-		if (ctrl->state() == OutputState::Idle && should_start)
-			ctrl->start();
-
-		/* One attempt per intent. A real failure remains visible instead of
-		 * the timer hammering the platform every 350 ms. */
-		it = m_pending_starts.erase(it);
-	}
-
 	for (int i = 0; i < m_list->count(); ++i) {
 		auto *item = m_list->item(i);
 		auto *card = qobject_cast<EndpointCard *>(m_list->itemWidget(item));
