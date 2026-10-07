@@ -58,7 +58,7 @@ HubTab::HubTab(EndpointRegistry &registry, QWidget *parent)
 	connect(&m_facebook, &FacebookClient::error,
 	        this, &HubTab::on_facebook_error);
 
-	refresh_youtube();
+	m_youtube_status->setText(tr("Waiting for OBS frontend to finish loading..."));
 
 	const HubState &state = m_config.state();
 	if (!state.youtube_client_id.empty() && !state.youtube_refresh_token.empty()) {
@@ -244,8 +244,20 @@ void HubTab::save_plan()
 	m_facebook_status->setText(tr("Broadcast plan saved."));
 }
 
+void HubTab::on_obs_frontend_ready()
+{
+	if (m_obs_frontend_ready)
+		return;
+
+	m_obs_frontend_ready = true;
+	refresh_youtube();
+}
+
 bool HubTab::youtube_native_config(std::string &stream_key, QString &service_name) const
 {
+	if (!m_obs_frontend_ready)
+		return false;
+
 	const ObsServiceConfig cfg = import_from_active_obs_profile();
 	service_name = QString::fromStdString(cfg.service_name);
 	if (!cfg.ok || !service_name.contains(QStringLiteral("YouTube"), Qt::CaseInsensitive))
@@ -257,6 +269,11 @@ bool HubTab::youtube_native_config(std::string &stream_key, QString &service_nam
 
 void HubTab::refresh_youtube()
 {
+	if (!m_obs_frontend_ready) {
+		m_youtube_status->setText(tr("Waiting for OBS frontend to finish loading..."));
+		return;
+	}
+
 	std::string key;
 	QString service;
 	if (youtube_native_config(key, service)) {
@@ -329,7 +346,11 @@ void HubTab::on_youtube_channel(const QString &id, const QString &name)
 	m_config.save(state);
 
 	m_youtube_status->setStyleSheet(QStringLiteral("color: #2ecc71;"));
-	refresh_youtube();
+	if (m_obs_frontend_ready)
+		refresh_youtube();
+	else
+		m_youtube_status->setText(
+			tr("✓ YouTube connected. Waiting for OBS frontend to finish loading..."));
 }
 
 void HubTab::prepare_youtube()

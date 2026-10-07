@@ -93,7 +93,13 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 	if (!g_registry)
 		return;
 
-	if (event == OBS_FRONTEND_EVENT_STREAMING_STARTED) {
+	if (event == OBS_FRONTEND_EVENT_FINISHED_LOADING) {
+		/* OBSStudioAPI's streaming-output accessor is not safe while plugins
+		 * are still being initialized. Let the Hub query the native service
+		 * only after the frontend announces that startup is complete. */
+		if (g_dock)
+			g_dock->on_obs_frontend_ready();
+	} else if (event == OBS_FRONTEND_EVENT_STREAMING_STARTED) {
 		obs_log(LOG_INFO, "OBS main stream started — reconciling linked endpoints");
 		reconcile_output_lifecycle();
 	} else if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPED) {

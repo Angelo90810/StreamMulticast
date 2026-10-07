@@ -25,6 +25,12 @@ MultistreamDock::MultistreamDock(EndpointRegistry &registry,
 	setup_ui();
 }
 
+void MultistreamDock::on_obs_frontend_ready()
+{
+	if (m_hub_tab)
+		m_hub_tab->on_obs_frontend_ready();
+}
+
 void MultistreamDock::setup_ui()
 {
 	setObjectName("StreamMulticastDock");

@@ -44,6 +44,8 @@ public:
 	                         QWidget          *parent = nullptr);
 	~MultistreamDock() override = default;
 
+	void on_obs_frontend_ready();
+
 private:
 	void setup_ui();
 

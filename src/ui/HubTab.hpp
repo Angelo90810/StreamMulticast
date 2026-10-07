@@ -27,6 +27,10 @@ class HubTab : public QWidget {
 public:
 	explicit HubTab(EndpointRegistry &registry, QWidget *parent = nullptr);
 
+	/* OBS frontend services are not safe to query while modules are still
+	 * loading. Called from OBS_FRONTEND_EVENT_FINISHED_LOADING. */
+	void on_obs_frontend_ready();
+
 private slots:
 	void save_plan();
 	void prepare_connected_destinations();
@@ -68,6 +72,7 @@ private:
 	FacebookClient m_facebook;
 	QString m_youtube_access_token;
 	bool m_youtube_prepare_pending{false};
+	bool m_obs_frontend_ready{false};
 
 	QLineEdit *m_title_edit{nullptr};
 	QPlainTextEdit *m_description_edit{nullptr};

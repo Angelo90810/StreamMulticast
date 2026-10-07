@@ -111,7 +111,7 @@ Building from source is **only** for contributors who want to modify the code â€
 
 The first v2 slice is now under development in the `Hub` tab:
 
-- **YouTube stays native in OBS**: the Hub uses Google OAuth (desktop loopback + PKCE), finds the reusable YouTube Live stream whose stream key matches the one already configured in OBS, creates the scheduled broadcast and binds it to that existing stream. No duplicate YouTube encoder/output is created.
+- **YouTube stays native in OBS**: the Hub uses Google OAuth (desktop loopback + PKCE), finds the reusable YouTube Live stream whose stream key matches the one already configured in OBS, creates the scheduled broadcast and binds it to that existing stream. No duplicate YouTube encoder/output is created. Native OBS service detection is deferred until `OBS_FRONTEND_EVENT_FINISHED_LOADING` so the plugin never queries the streaming output during module startup.
 - **Facebook uses the official Graph API flow**: device login, managed Page selection, Live creation, automatic ingest URL import into a `Facebook (Hub)` endpoint, then an explicit publish step after preview.
 - **Instagram stays manual** through Instagram Live Producer + the Instagram endpoint template.
 - **Prepare YouTube + Facebook** prepares both connected destinations from one title/description/schedule/privacy form. YouTube uses auto-start/auto-stop on the OBS-native stream; Facebook remains unpublished until its explicit Publish button is pressed after preview.
