@@ -17,6 +17,24 @@ GPLv2 — see LICENSE for full text.
 
 namespace smulti {
 
+namespace {
+
+bool controller_settings_changed(const Endpoint &a, const Endpoint &b)
+{
+	return a.server_url != b.server_url ||
+	       a.stream_key != b.stream_key ||
+	       a.video_settings_mode != b.video_settings_mode ||
+	       a.video_codec != b.video_codec ||
+	       a.encoder_backend != b.encoder_backend ||
+	       a.video_bitrate_kbps != b.video_bitrate_kbps ||
+	       a.keyframe_interval_sec != b.keyframe_interval_sec ||
+	       a.audio_settings_mode != b.audio_settings_mode ||
+	       a.audio_bitrate_kbps != b.audio_bitrate_kbps ||
+	       a.orientation != b.orientation;
+}
+
+} // namespace
+
 /* -----------------------------------------------------------------------
  * Constructor / Destructor
  * ----------------------------------------------------------------------- */
@@ -151,8 +169,13 @@ void EndpointRegistry::add(Endpoint ep)
  * ----------------------------------------------------------------------- */
 void EndpointRegistry::update(const Endpoint &ep)
 {
-	bool was_running = false;
+	bool controller_changed = false;
+	bool old_was_active = false;
+	bool old_handoff_pending = false;
+	bool disable_existing = false;
 	std::shared_ptr<OutputController> old_ctrl;
+	std::shared_ptr<OutputController> replacement;
+
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		auto it = std::find_if(m_endpoints.begin(), m_endpoints.end(),
@@ -162,52 +185,53 @@ void EndpointRegistry::update(const Endpoint &ep)
 			return;
 		}
 
+		const Endpoint previous = *it;
+		controller_changed = controller_settings_changed(previous, ep);
+		disable_existing = previous.enabled && !ep.enabled;
 		*it = ep;
 
-		/* Recreate controller with new settings.  The OLD controller is
-		 * extracted here, WHILE HOLDING m_mutex; stop()/enqueue() happen
-		 * AFTER the lock is released below (see item 6 of the fix-round 1
-		 * decision log entry — stop() itself must never run under this
-		 * lock, not just the reaper hand-off).  was_running gates only
-		 * whether the NEW controller gets started afterward. */
 		auto ctrl_it = m_controllers.find(ep.id);
-		if (ctrl_it != m_controllers.end()) {
-			was_running = ctrl_it->second->has_active_session();
-			old_ctrl = std::move(ctrl_it->second);
-			ctrl_it->second = std::make_shared<OutputController>(ep, m_reaper);
+		if (ctrl_it == m_controllers.end()) {
+			/* Self-heal a partially corrupted registry. */
+			replacement = std::make_shared<OutputController>(ep, m_reaper);
+			m_controllers[ep.id] = replacement;
+		} else if (!controller_changed) {
+			/* Name, linked-to-main, enabled and ordering do not require a
+			 * destructive RTMP/encoder rebuild. In particular, simply
+			 * opening Edit and pressing Save must not interrupt a live
+			 * stream. */
+			ctrl_it->second->set_enabled(ep.enabled);
 		} else {
-			/* Self-heal a partially corrupted registry instead of leaving an
-			 * endpoint permanently without a controller. */
-			m_controllers[ep.id] = std::make_shared<OutputController>(ep, m_reaper);
+			old_was_active = ctrl_it->second->has_active_session();
+			old_handoff_pending = ctrl_it->second->start_blocked() ||
+			                      ctrl_it->second->state() == OutputState::Stopping;
+			old_ctrl = std::move(ctrl_it->second);
+
+			replacement = std::make_shared<OutputController>(ep, m_reaper);
+			if (old_was_active || old_handoff_pending)
+				replacement->begin_handoff_wait();
+			ctrl_it->second = replacement;
 		}
 	}
 
 	if (old_ctrl) {
 		old_ctrl->retire();
-		/* stop() is cheap and non-blocking now (see OutputController's
-		 * detach-and-reaper rule) — call it unconditionally rather than only
-		 * when connection settings changed.  The old code's conn_changed
-		 * gate left a window where a Live-but-unrelated-settings-changed
-		 * controller kept streaming, un-stopped, while the just-created NEW
-		 * controller was started right below — briefly double-streaming to
-		 * the same endpoint until the reaper's shutdown_blocking() caught up
-		 * with the old one asynchronously.  Always stopping first also
-		 * closes that window for a Reconnecting old controller, which
-		 * is_running() never covered. */
 		old_ctrl->stop();
 		m_reaper.enqueue(old_ctrl);
-	}
 
-	if (was_running && ep.enabled) {
-		/* Mark the replacement as temporarily unavailable.  The reaper only
-		 * flips it back to Idle after every old-session teardown job ahead
-		 * of this one has completed.  The UI decides whether/when to restart
-		 * it, so no queued callback can outlive the plugin DLL. */
-		auto ctrl = controller_for(ep.id);
-		if (ctrl) {
-			ctrl->begin_handoff_wait();
-			m_reaper.enqueue([ctrl]() { ctrl->finish_handoff_wait(); });
+		if (replacement && (old_was_active || old_handoff_pending)) {
+			/* ControllerReaper is FIFO. This task therefore runs only after
+			 * every teardown job queued for the prior controller(s), which
+			 * makes a rapid sequence of edits safe as well. */
+			m_reaper.enqueue([replacement]() { replacement->finish_handoff_wait(); });
 		}
+	} else if (disable_existing) {
+		/* Enabled is intentionally a non-structural setting. Stop the same
+		 * controller so re-enabling it cannot lose track of an older teardown
+		 * session that still owns an NVENC/RTMP output. */
+		auto ctrl = controller_for(ep.id);
+		if (ctrl)
+			ctrl->stop();
 	}
 
 	notify_observers(ChangeKind::Updated, ep);
