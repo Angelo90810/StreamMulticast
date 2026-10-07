@@ -1052,16 +1052,18 @@ void OutputController::handle_stop(int code)
 	if (stale_thread.joinable())
 		stale_thread.join();
 
-	m_stop_reconnect.store(false);
-
 	std::lock_guard<std::mutex> lock(m_mutex);
-	if (m_retired.load() || m_shutdown_done.load()) {
-		/* Retirement/shutdown started while we were joining the stale
-		 * thread above — do not spawn reconnect work for a controller the
-		 * registry no longer owns. */
-		m_state = OutputState::Idle;
+	if (!m_enabled.load() || m_retired.load() || m_shutdown_done.load() || !m_output) {
+		/* Disable/stop/retirement may have won while we were joining.
+		 * In particular, never reset m_stop_reconnect to false after stop()
+		 * has already detached the session. Preserve Stopping until its
+		 * reaper job completes. */
+		if (m_output && m_state != OutputState::Stopping)
+			m_state = OutputState::Idle;
 		return;
 	}
+
+	m_stop_reconnect.store(false);
 	m_reconnect_thread = std::thread(&OutputController::reconnect_thread_func, this);
 }
 
