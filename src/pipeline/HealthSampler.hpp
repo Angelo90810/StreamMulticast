@@ -120,6 +120,7 @@ private:
 	};
 	std::unordered_map<std::string, BitrateState> m_bitrate_state;
 
+	std::mutex        m_lifecycle_mutex;
 	std::atomic<bool> m_running {false};
 	std::thread       m_thread;
 
