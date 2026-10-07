@@ -210,11 +210,25 @@ void ConfigTab::setup_ui()
 	m_list->setSpacing(2);
 	outer_layout->addWidget(m_list, 1);
 
+	auto *actions = new QVBoxLayout();
+	actions->setContentsMargins(0, 0, 0, 0);
+	actions->setSpacing(4);
+
+	m_instagram_btn = new QPushButton(tr("+ Instagram"), this);
+	m_instagram_btn->setMinimumWidth(0);
+	m_instagram_btn->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+	m_instagram_btn->setToolTip(
+		tr("Open an Instagram Live Producer endpoint with the RTMPS server prefilled"));
+
 	m_add_btn = new QPushButton(tr("+ Add Endpoint"), this);
 	m_add_btn->setMinimumWidth(0);
 	m_add_btn->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-	outer_layout->addWidget(m_add_btn);
 
+	actions->addWidget(m_instagram_btn);
+	actions->addWidget(m_add_btn);
+	outer_layout->addLayout(actions);
+
+	connect(m_instagram_btn, &QPushButton::clicked, this, &ConfigTab::on_add_instagram);
 	connect(m_add_btn, &QPushButton::clicked, this, &ConfigTab::on_add_endpoint);
 	connect(m_list->model(), &QAbstractItemModel::rowsMoved, this, &ConfigTab::on_list_reorder);
 
@@ -229,7 +243,8 @@ void ConfigTab::rebuild_list()
 	const bool empty = endpoints.empty();
 	m_empty_label->setVisible(empty);
 	m_list->setVisible(!empty);
-	m_add_btn->setText(empty ? tr("+ Add First Endpoint") : tr("+ Add Endpoint"));
+	m_add_btn->setText(empty ? tr("+ Add Custom Endpoint") : tr("+ Add Endpoint"));
+	m_instagram_btn->setText(empty ? tr("+ Add Instagram") : tr("+ Instagram"));
 
 	for (const auto &ep : endpoints) {
 		auto *card = new EndpointCard(ep, nullptr);
@@ -257,6 +272,25 @@ void ConfigTab::on_add_endpoint()
 
 	const Endpoint result = dlg.result_endpoint();
 	m_registry.add(result);
+}
+
+void ConfigTab::on_add_instagram()
+{
+	Endpoint instagram = Endpoint::make_default("Instagram");
+	instagram.server_url = "rtmps://live-upload.instagram.com:443/rtmp/";
+	instagram.video_codec = VideoCodec::H264;
+	instagram.video_settings_mode = EncoderSettingsMode::Custom;
+	instagram.audio_settings_mode = EncoderSettingsMode::Custom;
+	instagram.video_bitrate_kbps = 6000;
+	instagram.audio_bitrate_kbps = 160;
+	instagram.keyframe_interval_sec = 2;
+	instagram.linked_to_main = true;
+
+	EndpointDialog dlg(instagram, m_registry, this);
+	if (dlg.exec() != QDialog::Accepted)
+		return;
+
+	m_registry.add(dlg.result_endpoint());
 }
 
 void ConfigTab::on_edit_endpoint(const std::string &id)
