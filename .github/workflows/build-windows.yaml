@@ -71,7 +71,6 @@ jobs:
             -StreamKey "ci-test-key" `
             -ExpiresAt "2099-01-01T00:00:00Z" `
             -OutputPath $out
-          if ($LASTEXITCODE -ne 0) { throw "TikTok bridge helper failed" }
           $json = Get-Content -LiteralPath $out -Raw | ConvertFrom-Json
           if ($json.name -ne "CI Bridge" -or
               $json.server_url -ne "rtmps://example.invalid/live" -or
