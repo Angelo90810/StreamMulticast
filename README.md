@@ -109,7 +109,7 @@ Building from source is **only** for contributors who want to modify the code â€
 
 ## Broadcast Hub (v2 development on main)
 
-The OBS dock is fully resizable: it can live on the left, right, bottom, or as a floating window without forcing OBS's preview or neighboring docks to a minimum width/height. Hub content scrolls when space is constrained, and Configure/Health can shrink independently.
+The OBS dock is fully resizable: it can live on the left, right, bottom, or as a floating window without forcing OBS's preview or neighboring docks to a minimum width/height. Hub content scrolls when space is constrained, and Configure/Health can shrink independently. Configure shows an explicit empty state and provides a one-click Instagram endpoint action with the Live Producer RTMPS server prefilled.
 
 The first v2 slice is now under development in the `Hub` tab:
 
