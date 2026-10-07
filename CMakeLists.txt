@@ -38,7 +38,7 @@ if(ENABLE_QT)
   # for some configurations. We hardcode the include search paths directly
   # to guarantee that <QtWidgets/QWidget> and <QWidget> both resolve.
   set(_OBSDEPS_QT6 "${CMAKE_CURRENT_SOURCE_DIR}/.deps/obs-deps-qt6-2026-07-15-x64")
-  if(EXISTS "${_OBSDEPS_QT6}/include")
+  if(WIN32 AND EXISTS "${_OBSDEPS_QT6}/include")
     target_include_directories(
       ${CMAKE_PROJECT_NAME}
       PRIVATE
