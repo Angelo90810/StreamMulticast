@@ -12,6 +12,7 @@ GPLv2 — see LICENSE for full text.
 #include <numeric>
 #include <chrono>
 #include <thread>
+#include <unordered_set>
 
 namespace smulti {
 
@@ -79,7 +80,11 @@ void HealthSampler::poll_loop()
 		/* Get all endpoints from registry (returns a copy — safe) */
 		auto endpoints = m_registry.all();
 
+		std::unordered_set<std::string> live_ids;
+		live_ids.reserve(endpoints.size());
+
 		for (const auto &ep : endpoints) {
+			live_ids.insert(ep.id);
 			/* M3: disabled endpoints are guaranteed non-running —
 			 * ConfigTab::on_toggle_endpoint() stops the output the moment
 			 * `enabled` flips to false, and a disabled endpoint is never
@@ -87,7 +92,12 @@ void HealthSampler::poll_loop()
 			 * and OutputController's locked state()/last_error() getters
 			 * entirely and write a cheap Idle snapshot directly. */
 			if (!ep.enabled) {
-				write_inactive_snapshot(ep, "", OutputState::Idle);
+				const int target =
+					ep.video_settings_mode == EncoderSettingsMode::Custom &&
+					ep.audio_settings_mode == EncoderSettingsMode::Custom
+						? ep.video_bitrate_kbps + ep.audio_bitrate_kbps
+						: -1;
+				write_inactive_snapshot(ep, "", OutputState::Idle, target, 0);
 				continue;
 			}
 
@@ -96,6 +106,25 @@ void HealthSampler::poll_loop()
 			 * hands it to the ControllerReaper. */
 			auto ctrl = m_registry.controller_for(ep.id);
 			sample_output(ep, ctrl);
+		}
+
+		/* Prune endpoints removed since the previous poll.  The table hid
+		 * stale snapshots because it keys rows from the registry, but the
+		 * maps themselves otherwise grew forever across add/remove cycles. */
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			for (auto it = m_snapshots.begin(); it != m_snapshots.end();) {
+				if (live_ids.count(it->first) == 0)
+					it = m_snapshots.erase(it);
+				else
+					++it;
+			}
+		}
+		for (auto it = m_bitrate_state.begin(); it != m_bitrate_state.end();) {
+			if (live_ids.count(it->first) == 0)
+				it = m_bitrate_state.erase(it);
+			else
+				++it;
 		}
 
 		/* Sleep remainder of interval */
@@ -116,79 +145,75 @@ void HealthSampler::poll_loop()
  * ----------------------------------------------------------------------- */
 void HealthSampler::sample_output(const Endpoint &ep, const std::shared_ptr<OutputController> &ctrl)
 {
-	std::string last_error = ctrl ? ctrl->last_error() : "";
-	OutputState state      = ctrl ? ctrl->state() : OutputState::Idle;
-
-	if (!ctrl || state == OutputState::Idle || state == OutputState::FailedHard) {
-		write_inactive_snapshot(ep, last_error, state);
+	if (!ctrl) {
+		const int target =
+			ep.video_settings_mode == EncoderSettingsMode::Custom &&
+			ep.audio_settings_mode == EncoderSettingsMode::Custom
+				? ep.video_bitrate_kbps + ep.audio_bitrate_kbps
+				: -1;
+		write_inactive_snapshot(ep, "", OutputState::Idle, target, 0);
 		return;
 	}
 
+	/* One locked controller snapshot keeps state/error/stats internally
+	 * consistent instead of sampling them across four separate lock windows. */
 	OutputController::SampleData sample = ctrl->sample();
-	if (!sample.active) {
-		/* M1 fix: this branch is reached for Reconnecting (output detached/
-		 * not yet re-attached) and for Starting before the output has
-		 * actually gone active — both are "not currently streaming" just
-		 * like Idle/FailedHard above, so the bitrate rolling window must be
-		 * reset here too. Previously only the Idle/FailedHard branch erased
-		 * m_bitrate_state, so a Reconnecting endpoint kept its stale
-		 * last_bytes. On reconnect, obs_output_get_total_bytes() restarts
-		 * near zero, and byte_diff = total - last_bytes (both uint64_t)
-		 * underflowed into a huge bogus value that then polluted the
-		 * rolling ~10-sample kbps average for several seconds. */
-		write_inactive_snapshot(ep, last_error, state);
+
+	if (!sample.active ||
+	    sample.state == OutputState::Idle ||
+	    sample.state == OutputState::FailedHard ||
+	    sample.state == OutputState::Stopping) {
+		write_inactive_snapshot(ep, sample.last_error, sample.state,
+		                        sample.target_bitrate_kbps,
+		                        sample.reconnect_count);
 		return;
 	}
 
 	HealthSnapshot snap;
-	snap.endpoint_id    = ep.id;
-	snap.target_bitrate = ep.video_bitrate_kbps + ep.audio_bitrate_kbps;
-	snap.last_error     = last_error;
-	snap.state          = state;
+	snap.endpoint_id = ep.id;
+	snap.target_bitrate = sample.target_bitrate_kbps;
+	snap.last_error = sample.last_error;
+	snap.state = sample.state;
+	snap.reconnect_count = sample.reconnect_count;
 
-	/* Bytes sent — compute diff for bitrate rolling average */
-	uint64_t total_bytes = sample.total_bytes;
-	uint64_t dropped     = static_cast<uint64_t>(sample.frames_dropped);
-
-	auto now = std::chrono::steady_clock::now();
+	const uint64_t total_bytes = sample.total_bytes;
+	snap.dropped_frames = static_cast<uint64_t>(sample.frames_dropped);
+	const auto now = std::chrono::steady_clock::now();
 
 	BitrateState &bstate = m_bitrate_state[ep.id];
 	if (bstate.last_bytes > 0) {
-		uint64_t byte_diff = total_bytes - bstate.last_bytes;
-		double elapsed_sec = std::chrono::duration<double>(now - bstate.last_time).count();
-		if (elapsed_sec > 0.0) {
-			double kbps = (static_cast<double>(byte_diff) * 8.0) / elapsed_sec / 1000.0;
-			bstate.samples.push_back(kbps);
-			if (static_cast<int>(bstate.samples.size()) > ROLLING_SAMPLES)
-				bstate.samples.erase(bstate.samples.begin());
+		/* Counters may reset across an extremely fast reconnect without a
+		 * polling tick observing the inactive window. Never unsigned-wrap. */
+		if (total_bytes >= bstate.last_bytes) {
+			const uint64_t byte_diff = total_bytes - bstate.last_bytes;
+			const double elapsed_sec =
+				std::chrono::duration<double>(now - bstate.last_time).count();
+			if (elapsed_sec > 0.0) {
+				const double kbps =
+					(static_cast<double>(byte_diff) * 8.0) / elapsed_sec / 1000.0;
+				bstate.samples.push_back(kbps);
+				if (static_cast<int>(bstate.samples.size()) > ROLLING_SAMPLES)
+					bstate.samples.erase(bstate.samples.begin());
+			}
+		} else {
+			bstate.samples.clear();
 		}
 	}
 	bstate.last_bytes = total_bytes;
-	bstate.last_time  = now;
+	bstate.last_time = now;
 
-	/* Rolling average bitrate */
 	if (!bstate.samples.empty()) {
-		double sum = std::accumulate(bstate.samples.begin(), bstate.samples.end(), 0.0);
+		const double sum =
+			std::accumulate(bstate.samples.begin(), bstate.samples.end(), 0.0);
 		snap.actual_bitrate = sum / static_cast<double>(bstate.samples.size());
 	}
 
-	snap.dropped_frames = dropped;
-
-	/* Uptime — computed from OutputController's own "start" signal timestamp
-	 * (std::chrono::steady_clock), NOT obs_output_get_connect_time_ms(): that
-	 * function returns the one-time RTMP handshake duration (set once, see
-	 * librtmp rtmp.c ~line 1112), not time-since-connect, which is why the
-	 * uptime column previously always showed ~0. */
-	auto connected_since = ctrl->connected_since();
-	if (connected_since.time_since_epoch().count() != 0) {
-		auto uptime = std::chrono::duration_cast<std::chrono::seconds>(now - connected_since).count();
+	if (sample.connected_since.time_since_epoch().count() != 0) {
+		const auto uptime =
+			std::chrono::duration_cast<std::chrono::seconds>(
+				now - sample.connected_since).count();
 		snap.uptime_sec = uptime > 0 ? uptime : 0;
 	}
-
-	/* Reconnect count — we count it from the reconnect_attempt field via state */
-	/* We don't have direct access to m_reconnect_attempt here (it's private).
-	 * In v1.1 expose it via a public getter on OutputController. */
-	snap.reconnect_count = 0; /* TODO(v1.1): expose reconnect count from OutputController */
 
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
@@ -205,16 +230,17 @@ void HealthSampler::sample_output(const Endpoint &ep, const std::shared_ptr<Outp
  * controller lookup at all (M3's disabled-endpoint fast path).
  * ----------------------------------------------------------------------- */
 void HealthSampler::write_inactive_snapshot(const Endpoint &ep, const std::string &last_error,
-                                             OutputState state)
+                                             OutputState state, int target_bitrate,
+                                             int reconnect_count)
 {
 	HealthSnapshot snap;
 	snap.endpoint_id     = ep.id;
-	snap.target_bitrate  = ep.video_bitrate_kbps + ep.audio_bitrate_kbps;
+	snap.target_bitrate  = target_bitrate;
 	snap.last_error      = last_error;
 	snap.state           = state;
 	snap.actual_bitrate  = 0.0;
 	snap.dropped_frames  = 0;
-	snap.reconnect_count = 0;
+	snap.reconnect_count = reconnect_count;
 	snap.uptime_sec      = 0;
 
 	std::lock_guard<std::mutex> lock(m_mutex);
