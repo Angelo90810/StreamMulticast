@@ -26,11 +26,15 @@ void obs_log(int log_level, const char *format, ...)
 	size_t length = 4 + strlen(PLUGIN_NAME) + strlen(format);
 
 	char *template = malloc(length + 1);
+	if (!template)
+		return;
 
-	snprintf(template, length, "[%s] %s", PLUGIN_NAME, format);
+	/* snprintf's size includes the terminating NUL. The previous code passed
+	 * `length` here even though the allocation is length+1, truncating the
+	 * last character of every plugin log format string. */
+	snprintf(template, length + 1, "[%s] %s", PLUGIN_NAME, format);
 
 	va_list(args);
-
 	va_start(args, format);
 	blogva(log_level, template, args);
 	va_end(args);
