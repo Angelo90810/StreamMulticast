@@ -29,7 +29,7 @@ All three run **at the same time**, from the same OBS scene.
 | `obs-multi-rtmp` | ❌ | ❌ | ✅ | ✅ | ✅ |
 | Aitum Multistream | 💰 (Pro) | 💰 (Pro / separate canvas plugin) | partial | ❌ | ✅ |
 | Restream / StreamYard / Castr | ✅ | ✅ | ❌ | ❌ | ❌ (cloud re-encode) |
-| **StreamMulticast** | ✅ | ✅ (Letterbox v1.0, Center-Crop v1.1) | ✅ | ✅ | ✅ |
+| **StreamMulticast** | ✅ | ✅ (stretch + true 90° rotated Program canvas) | ✅ | ✅ | ✅ |
 
 ---
 
@@ -44,10 +44,13 @@ All three run **at the same time**, from the same OBS scene.
 - **Linked-to-main toggle** — optionally start/stop selected endpoints with OBS's main "Start Streaming"
 - **Pre-defined endpoint templates** — Twitch, YouTube, Facebook, Kick, Trovo, custom RTMP
 
-### v1.0.5 — Per-output orientation
-- **Vertical 1080×1920 (Letterbox)** — stream the same OBS scene to a TikTok / YouTube Shorts / Instagram Reels / Facebook Reels endpoint with a 9:16 frame (the horizontal canvas is letterboxed inside the vertical frame)
-- Configurable per endpoint — horizontal + vertical run in parallel from the same OBS session
-- Center-Crop variant reserved for v1.1 (needs a per-output `obs_view_t` with custom render code)
+### v1.1 — Manual control, OBS inheritance, HEVC and vertical modes
+- **Manual Start/Stop per endpoint** when automatic linkage to the OBS main stream is disabled
+- **H.264 / H.265 (HEVC)** with auto-detected NVENC / QSV / AMF backends where available
+- **Use OBS settings** mode clones the currently configured OBS streaming video/audio encoder settings while keeping each endpoint independently encoded
+- **Vertical 1080×1920 — Stretch** fills the portrait frame by intentionally rescaling the full source
+- **Vertical 1080×1920 — Rotate 90°** uses a dedicated `obs_view_t` and the real OBS Program transition output; viewers can turn the phone sideways to see the complete landscape composition
+- Horizontal, stretched portrait and rotated portrait endpoints can run in parallel
 
 ### v1.0.6 — One-click import from OBS
 - **Import from OBS** button in the Endpoint dialog — reads server URL and stream key from your active OBS profile (whatever you've already connected via OBS's native "Connect Account" for Twitch / YouTube / Facebook / Kick / Trovo / Custom RTMP)
@@ -67,10 +70,10 @@ All three run **at the same time**, from the same OBS scene.
 - StreamMulticast does not generate TikTok keys, perform TikTok login, or bundle third-party generators
 - Default handoff path: `%APPDATA%\obs-studio\plugin_config\streammulticast\tiktok_bridge.json`
 
-## Not in v1.0.x (planned for v1.1+)
+## Roadmap / not implemented
 
-- Per-output **resolution + FPS** (currently global)
-- Per-output **Vertical Center-Crop** (9:16 slice, not just letterboxed)
+- Arbitrary per-output **resolution + FPS** beyond the built-in source/1080×1920 modes
+- Per-output **center-crop / reframed 9:16 composition**
 - Per-output **health-score** with auto-failover routing
 - **Stream info push** (set title / tags / category across platforms via OAuth)
 - Per-output **recording split**
@@ -81,7 +84,7 @@ All three run **at the same time**, from the same OBS scene.
 
 ## Installation (30 seconds)
 
-1. Download the latest `StreamMulticast-Windows-x64.zip` from the [Releases page](https://github.com/avanatro/StreamMulticast/releases)
+1. Download the latest `StreamMulticast-Windows-x64.zip` from the [Releases page](https://github.com/Angelo90810/StreamMulticast/releases)
 2. Close OBS if it's running
 3. Extract the ZIP into your OBS install — typically `C:\Program Files\obs-studio\` (the ZIP mirrors `obs-plugins\64bit\` and `data\obs-plugins\streammulticast\` so it merges cleanly)
 4. Start OBS, then **View → Docks → Multistream**
@@ -96,14 +99,15 @@ That's it. Building from source is **only** for contributors who want to modify 
 2. **Configure** tab → **+ Add Endpoint**
 3. Either click **Import from OBS** to pull the server URL + stream key from your active OBS profile, OR pick a template and paste the stream key manually
 4. For TikTok, optionally click **Import TikTok Bridge** to read a local bridge handoff file
-5. Choose **Output Orientation**:
-   - `Source (match OBS canvas)` — your normal horizontal stream
-   - `Vertical 1080×1920 — Letterbox` — for TikTok / Shorts / Reels endpoints
-6. Pick encoder backend + bitrate
-7. Decide whether this endpoint auto-starts with OBS's main "Start Streaming" (the **Linked to main** checkbox)
-8. Save, then switch to the **Health** tab to watch all outputs live
+5. Choose **Canvas mode**:
+   - `Source / match OBS canvas` — normal horizontal output
+   - `Vertical 1080×1920 — Stretch to full screen` — fills the portrait frame, intentionally changing aspect ratio
+   - `Vertical 1080×1920 — Rotate landscape 90°` — preserves the whole landscape Program output rotated inside a portrait stream
+6. Choose **Use OBS streaming encoder settings** or **Custom settings**. Custom mode supports H.264 and hardware HEVC when available.
+7. Choose whether the endpoint starts/stops with OBS. When automatic linkage is disabled, use the endpoint's own **Start/Stop** button.
+8. Save, then use the **Health** tab to monitor state, bitrate, drops, reconnects and errors.
 
-**Parallel horizontal + vertical example:** add Endpoint 1 = Twitch (Source orientation, NVENC 6 Mbit), Endpoint 2 = TikTok (Vertical 1080×1920, x264 2.5 Mbit), enable Linked-to-main on both → click OBS's native "Start Streaming" and both go live at once.
+**Parallel example:** YouTube can remain on OBS native output while Facebook and Instagram run as independent StreamMulticast endpoints with their own encoder/bitrate/canvas settings.
 
 Pair with [Stream Health Doctor](https://tools.avanatro.com/stream-health/) for deeper per-output telemetry in a separate browser window on a second monitor.
 
@@ -130,7 +134,7 @@ values, and can optionally start a user-chosen external helper.
 
 ## Build from source (contributors only)
 
-> **You probably don't need this.** End users should use the pre-built ZIP from [Releases](https://github.com/avanatro/StreamMulticast/releases) — see [Installation](#installation-30-seconds) above. This section exists for people who want to modify the code, audit it, or build for an unsupported platform.
+> **You probably don't need this.** End users should use the pre-built ZIP from [Releases](https://github.com/Angelo90810/StreamMulticast/releases) — see [Installation](#installation-30-seconds) above. This section exists for people who want to modify the code, audit it, or build for an unsupported platform.
 
 <details>
 <summary><strong>Show build instructions</strong></summary>
@@ -149,7 +153,7 @@ If you're starting from scratch (no toolchain): allow ~2-3 h for downloads (VS w
 ### Build + install
 
 ```powershell
-git clone https://github.com/avanatro/StreamMulticast.git
+git clone https://github.com/Angelo90810/StreamMulticast.git
 cd StreamMulticast
 cmake --preset windows-x64                                  # downloads libobs deps on first run
 cmake --build --preset windows-x64 --config RelWithDebInfo  # ~30 sec on warm cache
@@ -160,7 +164,7 @@ Output: `build_x64\RelWithDebInfo\streammulticast.dll` (≈230 KB). The install 
 
 ### CI
 
-GitHub Actions builds Windows-x64 on every push to `main` and produces release artifacts when you push a `v*` tag. See `.github/workflows/build-windows.yaml`.
+GitHub Actions builds Windows-x64 on every push to `main`, validates the installable OBS package layout, and publishes a release from an explicit `publish-v*` commit after the build succeeds. See `.github/workflows/build-windows.yaml`.
 
 </details>
 
@@ -170,7 +174,7 @@ GitHub Actions builds Windows-x64 on every push to `main` and produces release a
 
 Native C++17 plugin against `libobs`, Qt 6 for the dock. Single-source / multi-encoder design: the OBS main video mix is tapped once, then N parallel `obs_encoder_t` instances feed N parallel `obs_output_t` RTMP outputs. Per-endpoint bitrate, audio bitrate, encoder backend and orientation are independent.
 
-For Vertical-Letterbox endpoints, `obs_output_set_video_conversion()` rescales the output to 1080×1920 with OBS's built-in scale-to-fit (letterbox). Source-orientation endpoints stream the canvas at its native resolution.
+For portrait stretch, scaling is configured on the encoder with `obs_encoder_set_scaled_size()`; encoded outputs never call the raw-output-only `obs_output_set_video_conversion()`. Rotated portrait mode creates a dedicated 1080×1920 `obs_view_t`, renders OBS output channel 0 (the real Program transition source) through a 90° transformed private scene, and binds that video mix to the endpoint encoder.
 
 Threading: a background `HealthSampler` thread polls each output at 2 Hz; the Qt UI reads thread-safe snapshots on the main thread (Qt::QueuedConnection).
 
