@@ -11,6 +11,7 @@ GPLv2 — see LICENSE for full text.
 #include <obs-data.h>
 #include <util/platform.h>
 #include <util/base.h>
+#include <util/bmem.h>
 
 namespace smulti {
 
