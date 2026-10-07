@@ -33,8 +33,9 @@ class EndpointRegistry;
  *   5: Reconnects
  *   6: Uptime
  *
- * refresh() fetches a snapshot from HealthSampler and calls
- * beginResetModel/endResetModel.  Called from HealthTab's 500 ms QTimer.
+ * refresh() fetches a snapshot from HealthSampler. It resets the model only
+ * when endpoint topology/order changes; routine health ticks emit dataChanged
+ * only for the cells whose values changed. Called from HealthTab's 500 ms QTimer.
  *
  * Thread safety: refresh() is always called from the Qt main thread
  * (via QTimer → queued connection ensures this).
