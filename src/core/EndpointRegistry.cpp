@@ -200,6 +200,13 @@ void EndpointRegistry::update(const Endpoint &ep)
 			 * opening Edit and pressing Save must not interrupt a live
 			 * stream. */
 			ctrl_it->second->set_enabled(ep.enabled);
+
+			/* A queued start belongs to the old auto-link intent. If the
+			 * user unlinks the endpoint while teardown is still pending,
+			 * that stale request must not resurrect it later as a manual
+			 * stream. */
+			if (previous.linked_to_main && !ep.linked_to_main)
+				ctrl_it->second->cancel_start_request();
 		} else {
 			old_needs_handoff = ctrl_it->second->has_session_resources() ||
 			                    ctrl_it->second->start_blocked();
