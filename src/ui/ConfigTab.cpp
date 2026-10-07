@@ -116,6 +116,11 @@ void EndpointCard::update_runtime(OutputState state, const std::string &last_err
 		led = "background: #e74c3c; border-radius: 7px;";
 		text = tr("Start");
 		break;
+	case OutputState::Stopping:
+		led = "background: #7f8c8d; border-radius: 7px;";
+		text = tr("Stopping...");
+		can_click = false;
+		break;
 	case OutputState::Idle:
 	default:
 		break;
