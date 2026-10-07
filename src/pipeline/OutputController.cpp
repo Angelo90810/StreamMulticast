@@ -97,6 +97,7 @@ int reconnect_delay_seconds(int attempt, int max_attempts)
 OutputController::OutputController(const Endpoint &ep, ControllerReaper &reaper)
 	: m_endpoint(ep)
 	, m_reaper(reaper)
+	, m_enabled(ep.enabled)
 {
 	if (ep.video_settings_mode == EncoderSettingsMode::Custom)
 		m_effective_video_bitrate_kbps = ep.video_bitrate_kbps;
@@ -440,9 +441,9 @@ bool OutputController::start()
 {
 	std::lock_guard<std::mutex> lifecycle_lock(m_lifecycle_mutex);
 
-	if (!m_endpoint.enabled || m_start_blocked.load() ||
+	if (!m_enabled.load() || m_start_blocked.load() ||
 	    m_retired.load() || m_shutdown_done.load()) {
-		const char *reason = !m_endpoint.enabled ? "endpoint disabled"
+		const char *reason = !m_enabled.load() ? "endpoint disabled"
 			: (m_start_blocked.load() ? "waiting for previous teardown"
 			: (m_retired.load() ? "controller retired" : "controller shutting down"));
 		obs_log(LOG_WARNING, "OutputController [%s]: start ignored (%s)",
