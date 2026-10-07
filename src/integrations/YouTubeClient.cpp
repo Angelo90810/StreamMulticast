@@ -11,6 +11,7 @@ GPLv2 — see LICENSE for full text.
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QHostAddress>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRandomGenerator>
@@ -108,12 +109,11 @@ void YouTubeClient::accept_oauth_connection()
 		return;
 
 	connect(socket, &QTcpSocket::readyRead, this, [this, socket]() {
-		const QByteArray request = socket->readAll();
-		const int eol = request.indexOf("\r\n");
-		if (eol <= 0)
+		if (!socket->canReadLine())
 			return;
 
-		const QList<QByteArray> parts = request.left(eol).split(' ');
+		const QByteArray request_line = socket->readLine().trimmed();
+		const QList<QByteArray> parts = request_line.split(' ');
 		if (parts.size() < 2) {
 			socket->disconnectFromHost();
 			return;
@@ -169,7 +169,7 @@ void YouTubeClient::exchange_authorization_code(const QString &code)
 	form.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("authorization_code"));
 	form.addQueryItem(QStringLiteral("redirect_uri"), m_redirect_uri);
 
-	QNetworkRequest request(QUrl(QString::fromLatin1(GOOGLE_TOKEN_URL)));
+	QNetworkRequest request{QUrl(QString::fromLatin1(GOOGLE_TOKEN_URL))};
 	request.setHeader(QNetworkRequest::ContentTypeHeader,
 	                  QStringLiteral("application/x-www-form-urlencoded"));
 

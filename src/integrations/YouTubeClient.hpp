@@ -10,6 +10,7 @@ GPLv2 — see LICENSE for full text.
 
 #include <QObject>
 #include <QNetworkAccessManager>
+#include <QNetworkRequest>
 #include <QTcpServer>
 #include <QUrl>
 
