@@ -4,6 +4,7 @@ StreamMulticast core regression tests
 
 #include "../src/core/Endpoint.hpp"
 #include "../src/core/SecretStore.hpp"
+#include "../src/pipeline/LifecyclePolicy.hpp"
 
 #include <obs-data.h>
 
@@ -144,6 +145,48 @@ bool test_secret_store()
 #endif
 }
 
+
+bool test_lifecycle_policy()
+{
+	{
+		auto d = decide_lifecycle(true, true, true, OutputState::Idle, false, false, false);
+		if (!check(d.request_start && !d.stop, "linked idle endpoint should start with main stream"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, true, false, OutputState::Live, false, false, true);
+		if (!check(d.stop && d.cancel_start_request, "linked live endpoint should stop with main stream"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, false, true, OutputState::Idle, false, false, false);
+		if (!check(!d.request_start && !d.stop, "manual endpoint must not auto-start with OBS"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, false, false, OutputState::Idle, false, true, false);
+		if (!check(d.request_start, "manual live-edit restart request should be honored"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, true, false, OutputState::Live, false, false, true);
+		if (!check(d.stop, "manual-to-linked transition while OBS is stopped must stop endpoint"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(false, true, true, OutputState::Live, false, true, true);
+		if (!check(d.stop && d.cancel_start_request && !d.request_start,
+		           "disabled endpoint must stop and clear pending start"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, true, true, OutputState::FailedHard, false, false, true);
+		if (!check(!d.request_start, "FailedHard must not be hammered by lifecycle timer"))
+			return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main()
@@ -152,7 +195,8 @@ int main()
 		test_uuid() &&
 		test_endpoint_roundtrip() &&
 		test_legacy_and_validation() &&
-		test_secret_store();
+		test_secret_store() &&
+		test_lifecycle_policy();
 
 	if (ok)
 		std::cout << "All StreamMulticast core tests passed\n";
