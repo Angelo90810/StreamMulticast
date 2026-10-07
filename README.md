@@ -1,6 +1,6 @@
 # StreamMulticast
 
-> Multi-platform streaming for OBS Studio — **per-output bitrate**, **per-output orientation** (horizontal + vertical in parallel), free, open-source, no account, no cloud.
+> Multi-destination streaming for OBS Studio on **Windows x64** — **per-output bitrate**, **per-output orientation** (horizontal + vertical in parallel), free, open-source, no account, no cloud.
 
 The features Aitum Multistream charges for, built right into OBS.
 
@@ -8,7 +8,7 @@ The features Aitum Multistream charges for, built right into OBS.
 
 ## What it does
 
-Stream to multiple RTMP endpoints (Twitch, YouTube, Facebook, Kick, Trovo, custom) simultaneously from a single OBS instance, with **independent bitrate, encoder backend, and frame orientation per output**.
+Stream to multiple RTMP endpoints (Twitch, YouTube, Facebook, Trovo, custom, and provider-supplied Kick URLs) simultaneously from a single OBS instance, with **independent bitrate, encoder backend, and frame orientation per output**.
 
 **Example** — a 10 Mbit/s upload pipe can power:
 
@@ -42,7 +42,7 @@ All three run **at the same time**, from the same OBS scene.
 - **Coexistence with OBS native streaming** — Twitch markers, replay buffer and recording stay untouched
 - **Auto-reconnect with backoff** — 1s / 2s / 5s / 10s / 30s / 60s, max 10 attempts before hard-fail
 - **Linked-to-main toggle** — optionally start/stop selected endpoints with OBS's main "Start Streaming"
-- **Pre-defined endpoint templates** — Twitch, YouTube, Facebook, Kick, Trovo, custom RTMP
+- **Pre-defined endpoint templates** — Twitch, YouTube, Facebook, Trovo, custom RTMP. Kick is intentionally custom/import-only because its ingest host is provider/session dependent.
 
 ### v1.1 — Manual control, OBS inheritance, HEVC and vertical modes
 - **Manual Start/Stop per endpoint** when automatic linkage to the OBS main stream is disabled
@@ -53,7 +53,7 @@ All three run **at the same time**, from the same OBS scene.
 - Horizontal, stretched portrait and rotated portrait endpoints can run in parallel
 
 ### v1.0.6 — One-click import from OBS
-- **Import from OBS** button in the Endpoint dialog — reads server URL and stream key from your active OBS profile (whatever you've already connected via OBS's native "Connect Account" for Twitch / YouTube / Facebook / Kick / Trovo / Custom RTMP)
+- **Import from OBS** button in the Endpoint dialog — reads the live RTMP/RTMPS server URL and stream key from your active OBS profile, including provider-specific ingest URLs when OBS exposes them
 - No OAuth flow needed inside StreamMulticast — we piggyback on OBS's own connection
 - Handles OBS 28-31 config layout (`global.ini` legacy + `user.ini` modern)
 
@@ -113,22 +113,11 @@ Pair with [Stream Health Doctor](https://tools.avanatro.com/stream-health/) for 
 
 ### TikTok Bridge handoff format
 
-Optional helper tools can pass TikTok RTMP data to StreamMulticast by writing:
+Optional helper tools can pass TikTok RTMP data to StreamMulticast with a local JSON handoff. The bundled Windows helper writes the stream key as a **DPAPI-protected** `stream_key_protected` value tied to the current Windows user. Legacy/third-party handoffs using `stream_key`/`key` remain readable for compatibility.
 
-```json
-{
-  "name": "TikTok Bridge",
-  "server_url": "rtmp://push-rtmp.tiktokcdn.com/live",
-  "stream_key": "paste-or-provider-key",
-  "expires_at": "2026-06-08T22:00:00Z"
-}
-```
+The importer also validates an optional ISO-8601 `expires_at` field and rejects expired credentials instead of attempting a doomed RTMP connection.
 
-`server` may be used instead of `server_url`, and `key` may be used instead of `stream_key`. The helper remains separate from StreamMulticast; this plugin only imports the local handoff file.
-
-A minimal Windows companion script lives in `tools/tiktok-bridge/`. It can write
-the handoff file from prompts, clipboard content, or explicit command-line
-values, and can optionally start a user-chosen external helper.
+A minimal Windows companion script lives in `tools/tiktok-bridge/`. It can write the protected handoff file from prompts, clipboard content, or explicit command-line values, and can optionally start a user-chosen external helper.
 
 ---
 
@@ -164,7 +153,7 @@ Output: `build_x64\RelWithDebInfo\streammulticast.dll` (≈230 KB). The install 
 
 ### CI
 
-GitHub Actions builds Windows-x64 on every push to `main`, validates the installable OBS package layout, and publishes a release from an explicit `publish-v*` commit after the build succeeds. See `.github/workflows/build-windows.yaml`.
+GitHub Actions builds the currently supported target, **Windows x64**, on every push to `main`. It runs the C++ core regression suite, validates the TikTok bridge helper, checks the installable OBS package layout, and publishes a release from an explicit `publish-v*` commit after the build succeeds. Third-party Actions are pinned to immutable commit SHAs. macOS/Linux presets remain contributor scaffolding and are not advertised as supported builds.
 
 </details>
 
@@ -176,7 +165,7 @@ Native C++17 plugin against `libobs`, Qt 6 for the dock. Single-source / multi-e
 
 For portrait stretch, scaling is configured on the encoder with `obs_encoder_set_scaled_size()`; encoded outputs never call the raw-output-only `obs_output_set_video_conversion()`. Rotated portrait mode creates a dedicated 1080×1920 `obs_view_t`, renders OBS output channel 0 (the real Program transition source) through a 90° transformed private scene, and binds that video mix to the endpoint encoder.
 
-Threading: a background `HealthSampler` thread polls each output at 2 Hz; the Qt UI reads thread-safe snapshots on the main thread (Qt::QueuedConnection).
+Threading: a background `HealthSampler` thread polls each output at 2 Hz; the Qt UI reads thread-safe snapshots on the main thread. Start/stop reconciliation is module-owned and independent of the dock, so closing or failing to register the UI cannot strand automatic/deferred output lifecycle transitions.
 
 ```
 src/
@@ -184,7 +173,8 @@ src/
 ├── plugin-support.{c,h}   obs_log helper (generated from .c.in via configure_file)
 ├── core/
 │   ├── Endpoint           Per-endpoint POD + serialise/deserialise
-│   ├── ConfigStore        JSON persist in OBS plugin_config dir
+│   ├── ConfigStore        Versioned JSON persist + forward-schema protection
+│   ├── SecretStore        Windows DPAPI at-rest stream-key protection
 │   ├── EndpointRegistry   In-memory list + observer pattern
 │   ├── ObsServiceImport   Read active OBS profile's stream key (v1.0.6)
 │   └── TikTokBridgeImport Read local TikTok Bridge handoff JSON (v1.0.7)
@@ -205,7 +195,7 @@ src/
 
 StreamMulticast does **not** collect telemetry, contact any servers other than the RTMP endpoints you configure, store data in any cloud, or require an account.
 
-Stream keys are persisted to `%APPDATA%\obs-studio\plugin_config\streammulticast\config.json` in plain text — the same way OBS stores its main stream key. If you are concerned about local-disk exposure, use full-disk encryption (BitLocker on Windows).
+On Windows, StreamMulticast persists endpoint stream keys using **Windows DPAPI (CurrentUser)** in `%APPDATA%\obs-studio\plugin_config\streammulticast\config.json`; the bundled TikTok Bridge helper uses the same protection. Existing plaintext v1/v2 configs are read for compatibility and migrate to protected storage on the next successful save. DPAPI-protected keys are intentionally tied to the Windows user that created them.
 
 ---
 
@@ -222,4 +212,4 @@ Built by [Avanatro](https://avanatro.com). Part of the [Avanatro Streamer Tools]
 - [Stream Health Doctor](https://tools.avanatro.com/stream-health/) — free web-based OBS diagnostic HUD
 - **StreamMulticast** — this plugin
 
-Contact: contact@avanatro.com — bug reports + feature requests via [GitHub Issues](https://github.com/avanatro/StreamMulticast/issues).
+Contact: contact@avanatro.com — bug reports + feature requests via [GitHub Issues](https://github.com/Angelo90810/StreamMulticast/issues).
