@@ -124,6 +124,35 @@ bool test_legacy_and_validation()
 	       check(ep.orientation == OutputOrientation::SourceMatch, "invalid orientation clamp");
 }
 
+bool test_undecryptable_secret_preservation()
+{
+#ifdef _WIN32
+	obs_data_t *data = obs_data_create();
+	obs_data_set_string(data, "id", "foreign-dpapi");
+	obs_data_set_string(data, "name", "Foreign DPAPI");
+	obs_data_set_string(data, "server_url", "rtmps://example.invalid/live");
+	obs_data_set_string(data, "stream_key_protected", "dpapi:00");
+
+	Endpoint ep = Endpoint::deserialize(data);
+	obs_data_release(data);
+
+	if (!check(ep.stream_key.empty(), "undecryptable DPAPI key should not become plaintext"))
+		return false;
+	if (!check(ep.stream_key_decryption_failed, "undecryptable DPAPI key should be flagged"))
+		return false;
+	if (!check(ep.preserved_protected_stream_key == "dpapi:00",
+	           "undecryptable DPAPI blob should be preserved"))
+		return false;
+
+	obs_data_t *roundtrip = ep.serialize();
+	const std::string preserved = obs_data_get_string(roundtrip, "stream_key_protected");
+	obs_data_release(roundtrip);
+	return check(preserved == "dpapi:00", "undecryptable DPAPI blob was not round-tripped");
+#else
+	return true;
+#endif
+}
+
 bool test_secret_store()
 {
 #ifdef _WIN32
@@ -196,6 +225,7 @@ int main()
 		test_endpoint_roundtrip() &&
 		test_legacy_and_validation() &&
 		test_secret_store() &&
+		test_undecryptable_secret_preservation() &&
 		test_lifecycle_policy();
 
 	if (ok)
