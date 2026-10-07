@@ -536,7 +536,11 @@ void HubTab::upsert_facebook_endpoint(const QString &secure_url)
 		return;
 	}
 
-	const QString key = path.mid(slash + 1);
+	QString key = path.mid(slash + 1);
+	const QString encoded_query = parsed.query(QUrl::FullyEncoded);
+	if (!encoded_query.isEmpty())
+		key += QStringLiteral("?") + encoded_query;
+
 	path = path.left(slash + 1);
 	parsed.setPath(path);
 	parsed.setQuery(QString());
