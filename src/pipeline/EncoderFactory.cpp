@@ -13,28 +13,8 @@ GPLv2 — see LICENSE for full text.
 #include <obs-output.h>
 #include <obs-frontend-api.h>
 
-#include <set>
 
 namespace smulti {
-
-namespace {
-
-const std::set<std::string> &available_encoder_ids()
-{
-	static const std::set<std::string> ids = [] {
-		std::set<std::string> result;
-		size_t idx = 0;
-		const char *id = nullptr;
-		while (obs_enum_encoder_types(idx++, &id)) {
-			if (id)
-				result.insert(id);
-		}
-		return result;
-	}();
-	return ids;
-}
-
-} // namespace
 
 std::string EncoderFactory::encoder_type_id(EncoderBackend backend, VideoCodec codec)
 {
@@ -75,7 +55,20 @@ std::string EncoderFactory::codec_label(VideoCodec codec)
 
 bool EncoderFactory::is_encoder_available(const std::string &type_id)
 {
-	return !type_id.empty() && available_encoder_ids().count(type_id) != 0;
+	if (type_id.empty())
+		return false;
+
+	/* Do not cache this list. OBS modules are discovered during startup and
+	 * plugin load order is not a stable API contract. A cache populated
+	 * before obs-nvenc/obs-qsv/AMF registers would hide that encoder for the
+	 * entire OBS session. */
+	size_t idx = 0;
+	const char *id = nullptr;
+	while (obs_enum_encoder_types(idx++, &id)) {
+		if (id && type_id == id)
+			return true;
+	}
+	return false;
 }
 
 std::string EncoderFactory::resolve_encoder_type(EncoderBackend backend, VideoCodec codec)
@@ -134,13 +127,14 @@ obs_encoder_t *EncoderFactory::clone_obs_video_encoder(const Endpoint &ep,
 		return nullptr;
 	}
 
-	const char *type_id = obs_encoder_get_id(source);
+	const char *type_id_raw = obs_encoder_get_id(source);
+	const std::string type_id = type_id_raw ? type_id_raw : "";
 	obs_data_t *settings = obs_encoder_get_settings(source);
 	std::string encoder_name = name_hint + "_video_" + ep.id;
 
 	obs_encoder_t *enc = nullptr;
-	if (type_id && *type_id && settings) {
-		enc = obs_video_encoder_create(type_id, encoder_name.c_str(), settings, nullptr);
+	if (!type_id.empty() && settings) {
+		enc = obs_video_encoder_create(type_id.c_str(), encoder_name.c_str(), settings, nullptr);
 	}
 
 	if (settings)
@@ -155,7 +149,7 @@ obs_encoder_t *EncoderFactory::clone_obs_video_encoder(const Endpoint &ep,
 	obs_encoder_set_video(enc, obs_get_video());
 	obs_log(LOG_INFO,
 	        "EncoderFactory: cloned OBS video encoder '%s' (type=%s)",
-	        encoder_name.c_str(), type_id ? type_id : "(unknown)");
+	        encoder_name.c_str(), type_id.empty() ? "(unknown)" : type_id.c_str());
 	return enc;
 }
 
@@ -175,13 +169,14 @@ obs_encoder_t *EncoderFactory::clone_obs_audio_encoder(const Endpoint &ep,
 		return nullptr;
 	}
 
-	const char *type_id = obs_encoder_get_id(source);
+	const char *type_id_raw = obs_encoder_get_id(source);
+	const std::string type_id = type_id_raw ? type_id_raw : "";
 	obs_data_t *settings = obs_encoder_get_settings(source);
 	std::string encoder_name = name_hint + "_audio_" + ep.id;
 
 	obs_encoder_t *enc = nullptr;
-	if (type_id && *type_id && settings) {
-		enc = obs_audio_encoder_create(type_id, encoder_name.c_str(), settings, 0, nullptr);
+	if (!type_id.empty() && settings) {
+		enc = obs_audio_encoder_create(type_id.c_str(), encoder_name.c_str(), settings, 0, nullptr);
 	}
 
 	if (settings)
@@ -196,7 +191,7 @@ obs_encoder_t *EncoderFactory::clone_obs_audio_encoder(const Endpoint &ep,
 	obs_encoder_set_audio(enc, obs_get_audio());
 	obs_log(LOG_INFO,
 	        "EncoderFactory: cloned OBS audio encoder '%s' (type=%s)",
-	        encoder_name.c_str(), type_id ? type_id : "(unknown)");
+	        encoder_name.c_str(), type_id.empty() ? "(unknown)" : type_id.c_str());
 	return enc;
 }
 
