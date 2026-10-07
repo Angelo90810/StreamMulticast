@@ -41,8 +41,8 @@ if(ENABLE_FRONTEND_API)
 endif()
 
 if(ENABLE_QT)
-  find_package(Qt6 REQUIRED COMPONENTS Widgets Core Gui Network)
-  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
+  find_package(Qt6 REQUIRED COMPONENTS Widgets Core Gui)
+  target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
 
   # The obs-deps Qt6 ships with broken INTERFACE_INCLUDE_DIRECTORIES propagation
   # for some configurations. We hardcode the include search paths directly
@@ -86,12 +86,6 @@ target_sources(
     src/core/EndpointRegistry.cpp
     src/core/ObsServiceImport.cpp
     src/core/TikTokBridgeImport.cpp
-    src/core/HubConfig.cpp
-    src/core/IngestUrl.cpp
-
-    # Connected-platform integrations
-    src/integrations/FacebookClient.cpp
-    src/integrations/YouTubeClient.cpp
 
     # Pipeline layer
     src/pipeline/EncoderFactory.cpp
@@ -104,7 +98,6 @@ target_sources(
     src/ui/HealthTab.cpp
     src/ui/ConfigTab.cpp
     src/ui/EndpointDialog.cpp
-    src/ui/HubTab.cpp
 )
 
 # Include directories
@@ -140,16 +133,4 @@ if(BUILD_TESTING)
     target_link_libraries(StreamMulticastCoreTests PRIVATE Crypt32)
   endif()
   add_test(NAME StreamMulticastCoreTests COMMAND StreamMulticastCoreTests)
-
-  if(ENABLE_QT)
-    add_executable(
-      StreamMulticastHubTests
-      tests/HubTests.cpp
-      src/core/IngestUrl.cpp
-    )
-    target_compile_features(StreamMulticastHubTests PRIVATE cxx_std_17)
-    target_include_directories(StreamMulticastHubTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
-    target_link_libraries(StreamMulticastHubTests PRIVATE Qt6::Core)
-    add_test(NAME StreamMulticastHubTests COMMAND StreamMulticastHubTests)
-  endif()
 endif()
