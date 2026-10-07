@@ -167,6 +167,15 @@ public:
 	 */
 	void retire();
 
+	/**
+	 * Temporarily gate start() while an older controller for the same endpoint
+	 * is still being torn down. Prevents a short double-stream/double-NVENC
+	 * window after editing a live endpoint.
+	 */
+	void block_start();
+	void unblock_start();
+	bool start_blocked() const { return m_start_blocked.load(); }
+
 	/** Current state */
 	OutputState state() const;
 
@@ -302,6 +311,7 @@ private:
 	std::thread         m_reconnect_thread;
 	std::atomic<bool>   m_stop_reconnect {false};
 	std::atomic<bool>   m_retired {false};
+	std::atomic<bool>   m_start_blocked {false};
 
 	/** Guards shutdown_blocking() idempotency — set once, never reset. */
 	std::atomic<bool>   m_shutdown_done {false};
