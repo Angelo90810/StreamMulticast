@@ -34,17 +34,25 @@ HealthSampler::~HealthSampler()
  * ----------------------------------------------------------------------- */
 void HealthSampler::start()
 {
-	bool expected = false;
-	if (!m_running.compare_exchange_strong(expected, true))
+	std::lock_guard<std::mutex> lifecycle_lock(m_lifecycle_mutex);
+	if (m_running.load())
 		return;
+	/* A stopped sampler must have joined its previous thread before a new
+	 * one is published, otherwise an old poll loop can observe running=true
+	 * again and overlap the replacement thread. */
+	if (m_thread.joinable())
+		m_thread.join();
+	m_running.store(true);
 	m_thread = std::thread(&HealthSampler::poll_loop, this);
 	obs_log(LOG_INFO, "HealthSampler: started (2 Hz)");
 }
 
 void HealthSampler::stop()
 {
-	if (!m_running.exchange(false))
+	std::lock_guard<std::mutex> lifecycle_lock(m_lifecycle_mutex);
+	if (!m_running.load() && !m_thread.joinable())
 		return;
+	m_running.store(false);
 	if (m_thread.joinable())
 		m_thread.join();
 	obs_log(LOG_INFO, "HealthSampler: stopped");
