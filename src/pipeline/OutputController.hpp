@@ -160,6 +160,13 @@ public:
 	/** Explicit alias used by registry/frontend code when preserving intent. */
 	bool has_active_session() const;
 
+	/**
+	 * Permanently retire this controller after the registry replaces/removes it.
+	 * A retired controller rejects future deferred/manual starts and aborts
+	 * reconnect work while its detached resources are being reaped.
+	 */
+	void retire();
+
 	/** Current state */
 	OutputState state() const;
 
