@@ -57,6 +57,20 @@ const char *hard_fail_message(int code)
 	}
 }
 
+int encoder_bitrate_kbps(obs_encoder_t *encoder, int fallback)
+{
+	if (!encoder)
+		return fallback;
+
+	obs_data_t *settings = obs_encoder_get_settings(encoder);
+	if (!settings)
+		return fallback;
+
+	const int bitrate = static_cast<int>(obs_data_get_int(settings, "bitrate"));
+	obs_data_release(settings);
+	return bitrate > 0 ? bitrate : fallback;
+}
+
 } // anonymous namespace
 
 /* -----------------------------------------------------------------------
@@ -84,6 +98,10 @@ OutputController::OutputController(const Endpoint &ep, ControllerReaper &reaper)
 	: m_endpoint(ep)
 	, m_reaper(reaper)
 {
+	if (ep.video_settings_mode == EncoderSettingsMode::Custom)
+		m_effective_video_bitrate_kbps = ep.video_bitrate_kbps;
+	if (ep.audio_settings_mode == EncoderSettingsMode::Custom)
+		m_effective_audio_bitrate_kbps = ep.audio_bitrate_kbps;
 }
 
 OutputController::~OutputController()
@@ -117,7 +135,14 @@ OutputState OutputController::state() const
 bool OutputController::is_running() const
 {
 	std::lock_guard<std::mutex> lock(m_mutex);
-	return m_state == OutputState::Live || m_state == OutputState::Starting;
+	return m_state == OutputState::Live ||
+	       m_state == OutputState::Starting ||
+	       m_state == OutputState::Reconnecting;
+}
+
+bool OutputController::has_active_session() const
+{
+	return is_running();
 }
 
 std::string OutputController::last_error() const
@@ -130,12 +155,21 @@ OutputController::SampleData OutputController::sample() const
 {
 	std::lock_guard<std::mutex> lock(m_mutex);
 	SampleData data;
+	data.state = m_state;
+	data.last_error = m_last_error;
+	data.connected_since = m_connected_since;
+	data.reconnect_count = m_total_reconnects;
+
+	if (m_effective_video_bitrate_kbps > 0 && m_effective_audio_bitrate_kbps > 0)
+		data.target_bitrate_kbps =
+			m_effective_video_bitrate_kbps + m_effective_audio_bitrate_kbps;
+
 	if (!m_output)
-		return data; // active=false, zeroed — output already released or never created
+		return data;
 
 	data.active = obs_output_active(m_output);
 	if (data.active) {
-		data.total_bytes    = obs_output_get_total_bytes(m_output);
+		data.total_bytes = obs_output_get_total_bytes(m_output);
 		data.frames_dropped = obs_output_get_frames_dropped(m_output);
 	}
 	return data;
@@ -152,6 +186,7 @@ std::chrono::steady_clock::time_point OutputController::connected_since() const
  * ----------------------------------------------------------------------- */
 bool OutputController::ensure_rotated_pipeline()
 {
+	std::lock_guard<std::recursive_mutex> rotated_lock(m_rotated_mutex);
 	if (m_rotated_video && m_rotated_view && m_rotated_scene)
 		return true;
 
@@ -206,6 +241,7 @@ bool OutputController::ensure_rotated_pipeline()
 
 void OutputController::refresh_program_scene()
 {
+	std::lock_guard<std::recursive_mutex> rotated_lock(m_rotated_mutex);
 	if (m_endpoint.orientation != OutputOrientation::Vertical1080x1920Rotated ||
 	    !m_rotated_scene)
 		return;
@@ -250,6 +286,7 @@ bool OutputController::configure_video_pipeline(obs_encoder_t *encoder)
 		return false;
 
 	if (m_endpoint.orientation == OutputOrientation::Vertical1080x1920Rotated) {
+		std::lock_guard<std::recursive_mutex> rotated_lock(m_rotated_mutex);
 		if (!ensure_rotated_pipeline())
 			return false;
 		obs_encoder_set_video(encoder, m_rotated_video);
@@ -271,6 +308,7 @@ bool OutputController::configure_video_pipeline(obs_encoder_t *encoder)
 
 void OutputController::destroy_rotated_pipeline()
 {
+	std::lock_guard<std::recursive_mutex> rotated_lock(m_rotated_mutex);
 	if (m_rotated_item) {
 		obs_sceneitem_remove(m_rotated_item);
 		m_rotated_item = nullptr;
@@ -350,6 +388,7 @@ void OutputController::do_create_output()
 
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_output = new_output;
+	m_service = service;
 }
 
 /* -----------------------------------------------------------------------
@@ -357,7 +396,7 @@ void OutputController::do_create_output()
  * ----------------------------------------------------------------------- */
 bool OutputController::start()
 {
-	if (!m_endpoint.enabled) {
+	if (!m_endpoint.enabled || m_shutdown_done.load()) {
 		obs_log(LOG_WARNING, "OutputController [%s]: start ignored because endpoint is disabled",
 		        m_endpoint.name.c_str());
 		return false;
@@ -365,11 +404,16 @@ bool OutputController::start()
 
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-		if (m_state == OutputState::Live || m_state == OutputState::Starting)
-			return true; // already running
+		if (m_state == OutputState::Live ||
+		    m_state == OutputState::Starting ||
+		    m_state == OutputState::Reconnecting)
+			return true;
+		if (m_state == OutputState::Stopping)
+			return false;
 		m_state = OutputState::Starting;
 		m_last_error.clear();
 		m_reconnect_attempt = 0;
+		m_total_reconnects = 0;
 	}
 
 	obs_log(LOG_INFO, "OutputController [%s]: starting", m_endpoint.name.c_str());
@@ -439,9 +483,20 @@ bool OutputController::start()
 	obs_encoder_set_audio(audio_enc, obs_get_audio());
 
 	{
+		const int video_fallback =
+			m_endpoint.video_settings_mode == EncoderSettingsMode::Custom
+				? m_endpoint.video_bitrate_kbps : -1;
+		const int audio_fallback =
+			m_endpoint.audio_settings_mode == EncoderSettingsMode::Custom
+				? m_endpoint.audio_bitrate_kbps : -1;
+
 		std::lock_guard<std::mutex> lock(m_mutex);
 		m_video_enc = video_enc;
 		m_audio_enc = audio_enc;
+		m_effective_video_bitrate_kbps =
+			encoder_bitrate_kbps(video_enc, video_fallback);
+		m_effective_audio_bitrate_kbps =
+			encoder_bitrate_kbps(audio_enc, audio_fallback);
 	}
 
 	obs_output_set_video_encoder(output, video_enc);
@@ -449,14 +504,22 @@ bool OutputController::start()
 
 	bool started = obs_output_start(output);
 	if (!started) {
-		const char *err = obs_output_get_last_error(output);
+		const char *raw_err = obs_output_get_last_error(output);
+		const std::string error =
+			(raw_err && *raw_err) ? raw_err : "RTMP output failed to start";
 		obs_log(LOG_ERROR, "OutputController [%s]: obs_output_start failed: %s",
-		        m_endpoint.name.c_str(), err ? err : "(no error)");
+		        m_endpoint.name.c_str(), error.c_str());
+
+		/* Start failed synchronously, so the output is inactive and its
+		 * encoder references can be detached immediately. This prevents
+		 * repeated manual retries from accumulating stale encoder refs. */
+		obs_output_set_video_encoder(output, nullptr);
+		obs_output_set_audio_encoder(output, nullptr, 0);
 
 		std::lock_guard<std::mutex> lock(m_mutex);
 		do_release_encoders_locked();
-		m_state      = OutputState::FailedHard;
-		m_last_error = err ? err : "RTMP connect failed";
+		m_state = OutputState::FailedHard;
+		m_last_error = error;
 		return false;
 	}
 
@@ -482,8 +545,8 @@ void OutputController::stop()
 	obs_output_t *output_for_signals;
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
-		if (m_state == OutputState::Idle && !m_output)
-			return; // nothing to do
+		if ((m_state == OutputState::Idle || m_state == OutputState::Stopping) && !m_output)
+			return;
 		output_for_signals = m_output;
 	}
 
@@ -526,7 +589,7 @@ void OutputController::stop()
 		/* Re-check under the lock: another stop() call, or handle_stop()'s
 		 * hard-fail path, may have already detached/idled the session while
 		 * we were disconnecting signals above. */
-		if (m_state == OutputState::Idle && !m_output)
+		if ((m_state == OutputState::Idle || m_state == OutputState::Stopping) && !m_output)
 			return;
 
 		obs_log(LOG_INFO, "OutputController [%s]: stopping", m_endpoint.name.c_str());
@@ -536,15 +599,17 @@ void OutputController::stop()
 		 * immediately — the actual (potentially blocking) teardown happens
 		 * on the reaper thread below. */
 		output_to_release  = m_output;
-		service_to_release = output_to_release ? obs_output_get_service(output_to_release) : nullptr;
+		service_to_release = m_service;
 		video_to_release   = m_video_enc;
 		audio_to_release   = m_audio_enc;
 		reconnect_to_join = std::move(m_reconnect_thread);
 
 		m_output          = nullptr;
+		m_service         = nullptr;
 		m_video_enc       = nullptr;
 		m_audio_enc       = nullptr;
-		m_state           = OutputState::Idle;
+		m_state           = OutputState::Stopping;
+		m_last_error.clear();
 		m_connected_since = std::chrono::steady_clock::time_point{};
 	}
 
@@ -590,6 +655,10 @@ void OutputController::stop()
 		 * still touches service->output. */
 		if (service_to_release)
 			obs_service_release(service_to_release);
+
+		std::lock_guard<std::mutex> lock(self->m_mutex);
+		if (self->m_state == OutputState::Stopping && !self->m_output)
+			self->m_state = OutputState::Idle;
 	});
 }
 
@@ -645,7 +714,7 @@ void OutputController::shutdown_blocking()
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		output_to_release  = m_output;
-		service_to_release = output_to_release ? obs_output_get_service(output_to_release) : nullptr;
+		service_to_release = m_service;
 		video_to_release   = m_video_enc;
 		audio_to_release   = m_audio_enc;
 		reconnect_to_join = std::move(m_reconnect_thread);
@@ -656,9 +725,10 @@ void OutputController::shutdown_blocking()
 		 * still-valid pointer (fully before this point) or nullptr (fully
 		 * after) — never a pointer to an obs_output_t mid-teardown. */
 		m_output    = nullptr;
+		m_service   = nullptr;
 		m_video_enc = nullptr;
 		m_audio_enc = nullptr;
-		m_state     = OutputState::Idle;
+		m_state     = OutputState::Stopping;
 	}
 
 	/* Join the reconnect thread — this is the one place that is allowed to
@@ -697,6 +767,12 @@ void OutputController::shutdown_blocking()
 		obs_service_release(service_to_release);
 
 	destroy_rotated_pipeline();
+
+	{
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_state = OutputState::Idle;
+		m_connected_since = std::chrono::steady_clock::time_point{};
+	}
 }
 
 /* -----------------------------------------------------------------------
@@ -834,7 +910,12 @@ void OutputController::reconnect_thread_func()
 	};
 
 	while (!m_stop_reconnect.load()) {
-		int delay = reconnect_delay_seconds(m_reconnect_attempt);
+		int attempt = 0;
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			attempt = m_reconnect_attempt;
+		}
+		int delay = reconnect_delay_seconds(attempt);
 		if (delay < 0) {
 			obs_log(LOG_ERROR, "OutputController [%s]: max reconnect attempts reached — FailedHard",
 			        m_endpoint.name.c_str());
@@ -847,7 +928,7 @@ void OutputController::reconnect_thread_func()
 		}
 
 		obs_log(LOG_INFO, "OutputController [%s]: reconnect attempt %d in %ds",
-		        m_endpoint.name.c_str(), m_reconnect_attempt + 1, delay);
+		        m_endpoint.name.c_str(), attempt + 1, delay);
 
 		/* Wait for delay, checking stop flag AND session validity every 100 ms */
 		for (int elapsed = 0;
@@ -858,13 +939,15 @@ void OutputController::reconnect_thread_func()
 		if (m_stop_reconnect.load() || session_changed())
 			break;
 
-		++m_reconnect_attempt;
-
+		int current_attempt = 0;
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
 			if (m_stop_reconnect.load() || m_output != captured_output)
-				return; // stop() (or a fresh start()) already detached this session
-			do_release_encoders_locked(); // release stale encoders before restarting
+				return;
+			++m_reconnect_attempt;
+			++m_total_reconnects;
+			current_attempt = m_reconnect_attempt;
+			do_release_encoders_locked();
 		}
 
 		/* Re-attach guard: signal_stop() fires before the output's internal
@@ -892,7 +975,7 @@ void OutputController::reconnect_thread_func()
 			obs_log(LOG_WARNING,
 			        "OutputController [%s]: output still active %dms after stop — "
 			        "skipping reconnect attempt %d to avoid a broken re-attach",
-			        m_endpoint.name.c_str(), REATTACH_WAIT_TIMEOUT_MS, m_reconnect_attempt);
+			        m_endpoint.name.c_str(), REATTACH_WAIT_TIMEOUT_MS, current_attempt);
 			continue;
 		}
 
@@ -938,6 +1021,16 @@ void OutputController::reconnect_thread_func()
 			}
 			m_video_enc = video_enc;
 			m_audio_enc = audio_enc;
+			const int video_fallback =
+				m_endpoint.video_settings_mode == EncoderSettingsMode::Custom
+					? m_endpoint.video_bitrate_kbps : -1;
+			const int audio_fallback =
+				m_endpoint.audio_settings_mode == EncoderSettingsMode::Custom
+					? m_endpoint.audio_bitrate_kbps : -1;
+			m_effective_video_bitrate_kbps =
+				encoder_bitrate_kbps(video_enc, video_fallback);
+			m_effective_audio_bitrate_kbps =
+				encoder_bitrate_kbps(audio_enc, audio_fallback);
 		}
 
 		obs_output_set_video_encoder(captured_output, video_enc);
@@ -961,10 +1054,16 @@ void OutputController::reconnect_thread_func()
 				return;
 		}
 
-		const char *err = obs_output_get_last_error(captured_output);
+		const char *raw_err = obs_output_get_last_error(captured_output);
+		const std::string error =
+			(raw_err && *raw_err) ? raw_err : "RTMP reconnect failed";
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			if (m_output == captured_output)
+				m_last_error = error;
+		}
 		obs_log(LOG_WARNING, "OutputController [%s]: reconnect attempt %d failed: %s",
-		        m_endpoint.name.c_str(), m_reconnect_attempt,
-		        err ? err : "(unknown)");
+		        m_endpoint.name.c_str(), current_attempt, error.c_str());
 	}
 }
 
