@@ -29,14 +29,14 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
           fetch-depth: 0
 
 
       - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
           arch: x64
 
@@ -45,6 +45,9 @@ jobs:
 
       - name: Build
         run: cmake --build --preset windows-ci-x64 --config ${{ matrix.config }}
+
+      - name: Run core regression tests
+        run: ctest --test-dir build_x64 -C ${{ matrix.config }} --output-on-failure
 
       - name: Validate TikTok bridge script
         shell: pwsh
@@ -74,9 +77,30 @@ jobs:
           $json = Get-Content -LiteralPath $out -Raw | ConvertFrom-Json
           if ($json.name -ne "CI Bridge" -or
               $json.server_url -ne "rtmps://example.invalid/live" -or
-              $json.stream_key -ne "ci-test-key" -or
               $json.expires_at -ne "2099-01-01T00:00:00Z") {
-            throw "TikTok bridge helper wrote unexpected JSON"
+            throw "TikTok bridge helper wrote unexpected JSON metadata"
+          }
+          if (-not $json.stream_key_protected -or
+              -not ([string]$json.stream_key_protected).StartsWith("dpapi:")) {
+            throw "TikTok bridge helper did not protect the stream key"
+          }
+          if ($null -ne $json.stream_key) {
+            throw "TikTok bridge helper leaked plaintext stream_key"
+          }
+
+          $hex = ([string]$json.stream_key_protected).Substring(6)
+          $cipher = New-Object byte[] ($hex.Length / 2)
+          for ($i = 0; $i -lt $cipher.Length; $i++) {
+            $cipher[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16)
+          }
+          $clear = [Security.Cryptography.ProtectedData]::Unprotect(
+            $cipher,
+            $null,
+            [Security.Cryptography.DataProtectionScope]::CurrentUser
+          )
+          $plain = [Text.Encoding]::UTF8.GetString($clear)
+          if ($plain -ne "ci-test-key") {
+            throw "TikTok bridge DPAPI round-trip failed"
           }
 
       - name: Stage artifact
@@ -108,7 +132,7 @@ jobs:
           }
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ env.PLUGIN_NAME }}-windows-x64-${{ matrix.config }}
           path: stage/
@@ -124,7 +148,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Read release metadata
         id: meta
@@ -136,7 +160,7 @@ jobs:
           echo "name=StreamMulticast v$VERSION - OBS $OBS_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
 
@@ -149,7 +173,7 @@ jobs:
           cd ..
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.name }}
