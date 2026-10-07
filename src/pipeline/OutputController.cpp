@@ -1091,6 +1091,8 @@ void OutputController::reconnect_thread_func()
 	 * long.  Checking m_output != captured_output each 100ms poll iteration
 	 * (under a short lock) closes that stall. */
 	auto session_changed = [this, captured_output]() {
+		if (!m_enabled.load() || m_retired.load() || m_shutdown_done.load())
+			return true;
 		std::lock_guard<std::mutex> lock(m_mutex);
 		return m_output != captured_output;
 	};
