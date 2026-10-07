@@ -217,8 +217,16 @@ void ConfigTab::on_add_endpoint()
 {
 	Endpoint new_ep = Endpoint::make_default("New Endpoint");
 	EndpointDialog dlg(new_ep, m_registry, this);
-	if (dlg.exec() == QDialog::Accepted)
-		m_registry.add(dlg.result_endpoint());
+	if (dlg.exec() != QDialog::Accepted)
+		return;
+
+	const Endpoint result = dlg.result_endpoint();
+	m_registry.add(result);
+
+	/* Adding a linked endpoint while OBS is already live must not wait for a
+	 * future STREAMING_STARTED event that may be hours away. */
+	if (result.enabled && result.linked_to_main && obs_frontend_streaming_active())
+		m_pending_starts.insert(result.id);
 }
 
 void ConfigTab::on_edit_endpoint(const std::string &id)
