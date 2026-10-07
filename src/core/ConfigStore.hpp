@@ -16,6 +16,7 @@ GPLv2 — see LICENSE for full text.
 #include <mutex>
 #include <atomic>
 #include <thread>
+#include <cstdint>
 
 namespace smulti {
 
@@ -99,6 +100,8 @@ private:
 	 * refreshing the timestamp on every "not yet elapsed" tick meant it could
 	 * never elapse). */
 	std::atomic<bool>                    m_save_pending{false};
+	std::atomic<uint64_t>                m_save_generation{0};
+	uint64_t                             m_pending_generation{0};
 	std::vector<Endpoint>                m_pending_endpoints;
 	std::chrono::steady_clock::time_point m_last_change_request{};
 	std::mutex                           m_pending_mutex;
