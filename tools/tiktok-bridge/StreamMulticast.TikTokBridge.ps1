@@ -120,6 +120,13 @@ if (-not $StreamKey) {
 if (-not $ServerUrl -or -not $StreamKey) {
     throw "ServerUrl and StreamKey are required."
 }
+if ($ServerUrl -notmatch '^rtmps?://') {
+    throw "ServerUrl must begin with rtmp:// or rtmps://."
+}
+
+if ($PSBoundParameters.ContainsKey('StreamKey')) {
+    Write-Warning "Passing -StreamKey on the command line may leave the key in shell history. Prefer the secure prompt or clipboard import."
+}
 
 $payload = [ordered]@{
     name = $Name
@@ -135,6 +142,8 @@ if ($parent) {
     New-Item -ItemType Directory -Path $parent -Force | Out-Null
 }
 
-$payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+$json = $payload | ConvertTo-Json -Depth 4
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($OutputPath, $json, $utf8NoBom)
 Write-Host "Wrote TikTok Bridge handoff file: $OutputPath"
 Write-Host "Open StreamMulticast endpoint settings and click 'Import TikTok Bridge'."
