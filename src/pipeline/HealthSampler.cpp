@@ -156,9 +156,16 @@ void HealthSampler::sample_output(const Endpoint &ep, const std::shared_ptr<Outp
 	    sample.state == OutputState::Idle ||
 	    sample.state == OutputState::FailedHard ||
 	    sample.state == OutputState::Stopping) {
+		int64_t uptime_sec = 0;
+		if (sample.state == OutputState::Reconnecting &&
+		    sample.connected_since.time_since_epoch().count() != 0) {
+			const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+				std::chrono::steady_clock::now() - sample.connected_since).count();
+			uptime_sec = elapsed > 0 ? elapsed : 0;
+		}
 		write_inactive_snapshot(ep, sample.last_error, sample.state,
 		                        sample.target_bitrate_kbps,
-		                        sample.reconnect_count);
+		                        sample.reconnect_count, uptime_sec);
 		return;
 	}
 
@@ -224,7 +231,7 @@ void HealthSampler::sample_output(const Endpoint &ep, const std::shared_ptr<Outp
  * ----------------------------------------------------------------------- */
 void HealthSampler::write_inactive_snapshot(const Endpoint &ep, const std::string &last_error,
                                              OutputState state, int target_bitrate,
-                                             int reconnect_count)
+                                             int reconnect_count, int64_t uptime_sec)
 {
 	HealthSnapshot snap;
 	snap.endpoint_id     = ep.id;
@@ -234,7 +241,7 @@ void HealthSampler::write_inactive_snapshot(const Endpoint &ep, const std::strin
 	snap.actual_bitrate  = 0.0;
 	snap.dropped_frames  = 0;
 	snap.reconnect_count = reconnect_count;
-	snap.uptime_sec      = 0;
+	snap.uptime_sec      = uptime_sec;
 
 	std::lock_guard<std::mutex> lock(m_mutex);
 	m_snapshots[ep.id] = snap;
