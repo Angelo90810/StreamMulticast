@@ -107,21 +107,6 @@ Building from source is **only** for contributors who want to modify the code �
 ---
 
 
-## Broadcast Hub (v2 development on main)
-
-The OBS dock is fully resizable: it can live on the left, right, bottom, or as a floating window without forcing OBS's preview or neighboring docks to a minimum width/height. Hub content scrolls when space is constrained, and Configure/Health can shrink independently. Configure shows an explicit empty state and keeps endpoint creation in one generic flow; platform presets such as Instagram remain inside the endpoint dialog.
-
-The first v2 slice is now under development in the `Hub` tab:
-
-- **YouTube stays native in OBS**: the Hub uses Google OAuth (desktop loopback + PKCE), finds the reusable YouTube Live stream whose stream key matches the one already configured in OBS, creates the scheduled broadcast and binds it to that existing stream. No duplicate YouTube encoder/output is created. Native OBS service detection is deferred until `OBS_FRONTEND_EVENT_FINISHED_LOADING` so the plugin never queries the streaming output during module startup.
-- **Facebook uses the official Graph API flow**: device login, managed Page selection, Live creation, automatic ingest URL import into a `Facebook (Hub)` endpoint, then an explicit publish step after preview.
-- **Instagram stays manual** through Instagram Live Producer + the Instagram endpoint template.
-- **Prepare YouTube + Facebook** prepares both connected destinations from one title/description/schedule/privacy form. YouTube uses auto-start/auto-stop on the OBS-native stream; Facebook remains unpublished until its explicit Publish button is pressed after preview.
-- Hub refresh/Page tokens are stored with Windows DPAPI, like StreamMulticast stream keys.
-
-The YouTube flow requires a Google Cloud **Desktop OAuth client** with YouTube Data API v3 enabled. The OAuth callback is a random local `127.0.0.1` port and uses PKCE; only the refresh token is persisted, protected by Windows DPAPI. The Facebook flow requires a Meta developer app with Device Login enabled and the Page/Live permissions available for the account: `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, and `publish_video`. Production use may require Meta App Review. Until those app credentials exist, the existing manual endpoints remain fully supported.
-
----
 ## Usage
 
 1. Open the **Multistream** dock (`View → Docks → Multistream`)
