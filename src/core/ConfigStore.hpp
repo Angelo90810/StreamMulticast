@@ -77,6 +77,9 @@ public:
 	/** Current on-disk config path (may be empty before load()) */
 	std::string config_path() const { return m_config_path; }
 
+	/** True when a newer config schema was loaded read-only. */
+	bool writes_blocked() const { return m_writes_blocked.load(); }
+
 private:
 	/** Resolve (and create) the plugin config directory, returning the full path */
 	static std::string resolve_config_path();
@@ -99,6 +102,9 @@ private:
 	 * this used to cause: with 100 ms polling and a 500 ms threshold,
 	 * refreshing the timestamp on every "not yet elapsed" tick meant it could
 	 * never elapse). */
+	/* A config written by a newer plugin version may contain fields this
+	 * build cannot round-trip. Load known fields, but never overwrite it. */
+	std::atomic<bool>                    m_writes_blocked{false};
 	std::atomic<bool>                    m_save_pending{false};
 	std::atomic<uint64_t>                m_save_generation{0};
 	uint64_t                             m_pending_generation{0};
