@@ -47,7 +47,7 @@ All three run **at the same time**, from the same OBS scene.
 - **Pre-defined endpoint templates** — Twitch, YouTube, Facebook, Instagram, TikTok, Trovo, custom RTMP. Instagram uses the Live Producer RTMPS ingest preset; its per-session stream key still comes from Instagram Live Producer. Kick is intentionally custom/import-only because its ingest host is provider/session dependent.
 
 ### v1.1 — Manual control, OBS inheritance, HEVC and vertical modes
-- **Manual Start/Stop per endpoint** when automatic linkage to the OBS main stream is disabled
+- **Separate manual Start and Stop buttons on every endpoint**, including when automatic linkage to the OBS main stream is enabled
 - **H.264 / H.265 (HEVC)** with auto-detected NVENC / QSV / AMF backends where available
 - **Use OBS settings** mode clones the currently configured OBS streaming video/audio encoder settings while keeping each endpoint independently encoded
 - **Vertical 1080×1920 — Stretch** fills the portrait frame by intentionally rescaling the full source
@@ -111,7 +111,7 @@ Building from source is **only** for contributors who want to modify the code �
    - `Vertical 1080×1920 — Stretch to full screen` — fills the portrait frame, intentionally changing aspect ratio
    - `Vertical 1080×1920 — Rotate landscape 90°` — preserves the whole landscape Program output rotated inside a portrait stream
 5. Choose **Use OBS streaming encoder settings** or **Custom settings**. Custom mode supports H.264 and hardware HEVC when available.
-6. Choose whether the endpoint starts/stops with OBS. When automatic linkage is disabled, use the endpoint's own **Start/Stop** button.
+6. Choose whether the endpoint starts/stops with OBS. Each endpoint has separate **Start** and **Stop** buttons regardless of automatic linkage. Manual commands override automatic behavior for that endpoint until the next OBS main-stream start/stop event.
 7. Save, then use the **Health** tab to monitor state, bitrate, drops, reconnects and errors.
 
 **Parallel example:** YouTube can remain on OBS native output while Facebook and Instagram run as independent StreamMulticast endpoints with their own encoder/bitrate/canvas settings.
