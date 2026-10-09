@@ -23,7 +23,7 @@ EndpointCard::EndpointCard(const Endpoint &ep, QWidget *parent)
 {
 	setup_ui();
 	update_state(ep);
-	update_runtime(OutputState::Idle, {});
+	update_runtime(OutputState::Idle, {}, ManualOverride::Automatic);
 }
 
 void EndpointCard::setup_ui()
@@ -58,29 +58,33 @@ void EndpointCard::setup_ui()
 	root->addLayout(header);
 
 	auto *actions = new QHBoxLayout();
-	actions->setSpacing(6);
+	actions->setSpacing(4);
 	actions->addStretch(1);
 
-	auto action_button = [](QPushButton *button) {
-		/* All visible buttons get a readable independent width; no button
-		 * inherits the narrow width of the On checkbox above. */
-		button->setMinimumWidth(76);
-		button->setMaximumWidth(110);
+	auto action_button = [](QPushButton *button, int min_width) {
+		button->setMinimumWidth(min_width);
+		button->setMaximumWidth(92);
 		button->setMinimumHeight(28);
 		button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 	};
 
-	m_start_stop_btn = new QPushButton(tr("Start"), this);
-	action_button(m_start_stop_btn);
-	m_start_stop_btn->setToolTip(tr("Start or stop this endpoint independently"));
-	actions->addWidget(m_start_stop_btn);
+	/* Manual controls stay visible even if "linked to main" is checked.
+	 * Keeping the buttons distinct also avoids ambiguous Stop/Start during
+	 * a rapid state transition or failed RTMP connection. */
+	m_start_btn = new QPushButton(tr("Start"), this);
+	action_button(m_start_btn, 54);
+	actions->addWidget(m_start_btn);
+
+	m_stop_btn = new QPushButton(tr("Stop"), this);
+	action_button(m_stop_btn, 54);
+	actions->addWidget(m_stop_btn);
 
 	m_edit_btn = new QPushButton(tr("Edit"), this);
-	action_button(m_edit_btn);
+	action_button(m_edit_btn, 56);
 	actions->addWidget(m_edit_btn);
 
 	m_delete_btn = new QPushButton(tr("Delete"), this);
-	action_button(m_delete_btn);
+	action_button(m_delete_btn, 58);
 	actions->addWidget(m_delete_btn);
 	root->addLayout(actions);
 
@@ -93,8 +97,11 @@ void EndpointCard::setup_ui()
 	connect(m_delete_btn, &QPushButton::clicked, this, [this]() {
 		emit deleteRequested(m_id);
 	});
-	connect(m_start_stop_btn, &QPushButton::clicked, this, [this]() {
-		emit manualStartStopRequested(m_id);
+	connect(m_start_btn, &QPushButton::clicked, this, [this]() {
+		emit manualStartRequested(m_id);
+	});
+	connect(m_stop_btn, &QPushButton::clicked, this, [this]() {
+		emit manualStopRequested(m_id);
 	});
 }
 
@@ -108,43 +115,43 @@ void EndpointCard::update_state(const Endpoint &ep)
 	m_enabled_cb->setChecked(ep.enabled);
 	m_enabled_cb->blockSignals(false);
 
-	/* Manual control is intentionally exposed only when automatic linkage is
-	 * disabled. This keeps one obvious source of truth for start/stop. */
-	m_start_stop_btn->setVisible(!ep.linked_to_main);
-	m_start_stop_btn->setEnabled(ep.enabled);
-	m_start_stop_btn->setToolTip(
-		ep.linked_to_main
-			? tr("Automatic start/stop is enabled for this endpoint")
-			: tr("Start or stop this endpoint independently"));
+	/* Both controls are always visible; automatic linkage remains a
+	 * scheduling default, not a lockout of manual endpoint controls. */
+	m_start_btn->setVisible(true);
+	m_stop_btn->setVisible(true);
 }
 
-void EndpointCard::update_runtime(OutputState state, const std::string &last_error)
+void EndpointCard::update_runtime(OutputState state, const std::string &last_error,
+                                  ManualOverride manual_override)
 {
 	QString led = "background: #95a5a6; border-radius: 7px;";
-	QString text = tr("Start");
-	bool can_click = m_ep.enabled;
+	bool can_start = m_ep.enabled;
+	bool can_stop = false;
 
 	switch (state) {
 	case OutputState::Starting:
 		led = "background: #f1c40f; border-radius: 7px;";
-		text = tr("Stop");
+		can_start = false;
+		can_stop = m_ep.enabled;
 		break;
 	case OutputState::Live:
 		led = "background: #2ecc71; border-radius: 7px;";
-		text = tr("Stop");
+		can_start = false;
+		can_stop = m_ep.enabled;
 		break;
 	case OutputState::Reconnecting:
 		led = "background: #e67e22; border-radius: 7px;";
-		text = tr("Stop");
+		can_start = false;
+		can_stop = m_ep.enabled;
 		break;
 	case OutputState::FailedHard:
 		led = "background: #e74c3c; border-radius: 7px;";
-		text = tr("Start");
+		can_stop = m_ep.enabled;
 		break;
 	case OutputState::Stopping:
 		led = "background: #7f8c8d; border-radius: 7px;";
-		text = tr("Stopping...");
-		can_click = false;
+		can_start = false;
+		can_stop = false;
 		break;
 	case OutputState::Idle:
 	default:
@@ -152,19 +159,23 @@ void EndpointCard::update_runtime(OutputState state, const std::string &last_err
 	}
 
 	m_status_led->setStyleSheet(led);
-	m_start_stop_btn->setText(text);
-	m_start_stop_btn->setEnabled(can_click);
+	m_start_btn->setEnabled(can_start);
+	m_stop_btn->setEnabled(can_stop);
 
-	if (!last_error.empty()) {
-		QString error = QString::fromStdString(last_error);
-		m_status_led->setToolTip(error);
-		m_start_stop_btn->setToolTip(error);
+	const QString help =
+		m_ep.linked_to_main
+			? tr("Manual commands override automatic linking until the next OBS main-stream transition.")
+			: tr("Start or stop only this endpoint, independently from OBS.");
+
+	m_start_btn->setToolTip(help);
+	m_stop_btn->setToolTip(help);
+	if (manual_override == ManualOverride::ForceStop && m_ep.linked_to_main) {
+		m_status_led->setToolTip(
+			tr("Stopped manually. Automatic starting resumes on the next OBS stream cycle."));
+	} else if (!last_error.empty()) {
+		m_status_led->setToolTip(QString::fromStdString(last_error));
 	} else {
 		m_status_led->setToolTip(QString());
-		m_start_stop_btn->setToolTip(
-			m_ep.linked_to_main
-				? tr("Automatic start/stop is enabled for this endpoint")
-				: tr("Start or stop this endpoint independently"));
 	}
 }
 
@@ -257,8 +268,10 @@ void ConfigTab::rebuild_list()
 		connect(card, &EndpointCard::editRequested, this, &ConfigTab::on_edit_endpoint);
 		connect(card, &EndpointCard::enableToggled, this, &ConfigTab::on_toggle_endpoint);
 		connect(card, &EndpointCard::deleteRequested, this, &ConfigTab::on_delete_endpoint);
-		connect(card, &EndpointCard::manualStartStopRequested,
-		        this, &ConfigTab::on_manual_start_stop);
+		connect(card, &EndpointCard::manualStartRequested,
+		        this, &ConfigTab::on_manual_start);
+		connect(card, &EndpointCard::manualStopRequested,
+		        this, &ConfigTab::on_manual_stop);
 	}
 	refresh_runtime_states();
 }
@@ -298,21 +311,42 @@ void ConfigTab::on_toggle_endpoint(const std::string &id, bool enabled)
 	m_registry.update(updated);
 }
 
-void ConfigTab::on_manual_start_stop(const std::string &id)
+void ConfigTab::on_manual_start(const std::string &id)
 {
 	auto ep = m_registry.find(id);
-	if (!ep || !ep->enabled || ep->linked_to_main)
+	if (!ep || !ep->enabled)
+		return;
+
+	auto ctrl = m_registry.controller_for(id);
+	if (!ctrl || ctrl->state() == OutputState::Stopping)
+		return;
+
+	/* A linked endpoint is allowed to start even while the main OBS output
+	 * is off. The runtime override prevents the coordinator from stopping
+	 * it on its next 250 ms tick. */
+	if (ep->linked_to_main)
+		ctrl->set_manual_override(ManualOverride::ForceStart);
+	ctrl->request_start_when_ready();
+
+	refresh_runtime_states();
+}
+
+void ConfigTab::on_manual_stop(const std::string &id)
+{
+	auto ep = m_registry.find(id);
+	if (!ep || !ep->enabled)
 		return;
 
 	auto ctrl = m_registry.controller_for(id);
 	if (!ctrl)
 		return;
 
-	OutputState state = ctrl->state();
-	if (state == OutputState::Idle || state == OutputState::FailedHard)
-		ctrl->start();
-	else
-		ctrl->stop();
+	/* Set the override BEFORE stop() so the module coordinator never
+	 * interprets the transient Idle/Stopping state as an auto-start cue. */
+	if (ep->linked_to_main)
+		ctrl->set_manual_override(ManualOverride::ForceStop);
+	ctrl->cancel_start_request();
+	ctrl->stop();
 
 	refresh_runtime_states();
 }
@@ -351,9 +385,10 @@ void ConfigTab::refresh_runtime_states()
 
 		auto ctrl = m_registry.controller_for(card->endpoint_id());
 		if (ctrl)
-			card->update_runtime(ctrl->state(), ctrl->last_error());
+			card->update_runtime(ctrl->state(), ctrl->last_error(),
+			                     ctrl->manual_override());
 		else
-			card->update_runtime(OutputState::Idle, {});
+			card->update_runtime(OutputState::Idle, {}, ManualOverride::Automatic);
 	}
 }
 
