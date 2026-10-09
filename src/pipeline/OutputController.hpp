@@ -59,6 +59,15 @@ enum class OutputState : int {
 	Stopping     = 5,
 };
 
+/** Runtime-only manual command, overriding the automatic OBS linkage until
+ * the next OBS main streaming transition. This does not change endpoint
+ * settings or persist between OBS sessions. */
+enum class ManualOverride : int {
+	Automatic = 0,
+	ForceStart = 1,
+	ForceStop = 2,
+};
+
 /**
  * ReconnectSchedule — pure function, testable without libobs.
  *
@@ -175,9 +184,14 @@ public:
 	 */
 	bool request_start_when_ready();
 
-	/** Cancel a deferred auto-start request (explicit/main stop wins). */
+	/** Cancel a deferred start request (explicit stop wins). */
 	void cancel_start_request();
 	bool start_requested() const { return m_start_requested.load(); }
+
+	/** Runtime-only manual Start/Stop precedence over linked-to-main. */
+	void set_manual_override(ManualOverride value) { m_manual_override.store(value); }
+	ManualOverride manual_override() const { return m_manual_override.load(); }
+	void reset_manual_override() { m_manual_override.store(ManualOverride::Automatic); }
 
 	/**
 	 * Permanently retire this controller after the registry replaces/removes it.
@@ -342,6 +356,7 @@ private:
 	std::atomic<bool>   m_start_blocked {false};
 	std::atomic<bool>   m_enabled {true};
 	std::atomic<bool>   m_start_requested {false};
+	std::atomic<ManualOverride> m_manual_override {ManualOverride::Automatic};
 
 	/** Guards shutdown_blocking() idempotency — set once, never reset. */
 	std::atomic<bool>   m_shutdown_done {false};
