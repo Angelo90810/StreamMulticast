@@ -73,7 +73,8 @@ static void reconcile_output_lifecycle()
 			ctrl->state(),
 			ctrl->start_blocked(),
 			ctrl->start_requested(),
-			ctrl->has_session_resources());
+			ctrl->has_session_resources(),
+			ctrl->manual_override());
 
 		if (decision.cancel_start_request)
 			ctrl->cancel_start_request();
@@ -93,11 +94,19 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 	if (!g_registry)
 		return;
 
-	if (event == OBS_FRONTEND_EVENT_STREAMING_STARTED) {
-		obs_log(LOG_INFO, "OBS main stream started — reconciling linked endpoints");
-		reconcile_output_lifecycle();
-	} else if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPED) {
-		obs_log(LOG_INFO, "OBS main stream stopped — reconciling linked endpoints");
+	if (event == OBS_FRONTEND_EVENT_STREAMING_STARTED ||
+	    event == OBS_FRONTEND_EVENT_STREAMING_STOPPED) {
+		/* Manual overrides apply only to the current OBS streaming cycle.
+		 * Starting or stopping the main stream restores the saved automatic
+		 * behavior for linked endpoints, without changing their settings. */
+		for (const auto &ep : g_registry->all()) {
+			if (!ep.linked_to_main)
+				continue;
+			auto ctrl = g_registry->controller_for(ep.id);
+			if (ctrl)
+				ctrl->reset_manual_override();
+		}
+		obs_log(LOG_INFO, "OBS main stream state changed — reconciling linked endpoints");
 		reconcile_output_lifecycle();
 	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED ||
 	           event == OBS_FRONTEND_EVENT_TRANSITION_CHANGED) {
