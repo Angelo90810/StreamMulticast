@@ -7,20 +7,17 @@ GPLv2 — see LICENSE for full text.
 
 #include "EndpointDialog.hpp"
 #include "../core/ObsServiceImport.hpp"
-#include "../core/TikTokBridgeImport.hpp"
 
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QMessageBox>
-#include <QtWidgets/QFileDialog>
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QSizePolicy>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QScreen>
 #include <QtGui/QShowEvent>
-#include <QtCore/QFileInfo>
 #include <QtCore/QUrl>
 
 #include <algorithm>
@@ -129,9 +126,7 @@ void EndpointDialog::setup_ui()
 	m_import_btn = new QPushButton(tr("Import connection from OBS"), connection_group);
 	m_import_btn->setToolTip(
 		tr("Copies the active OBS profile's server URL and stream key into this endpoint."));
-	m_tiktok_bridge_btn = new QPushButton(tr("Import TikTok Bridge"), connection_group);
 	import_row->addWidget(m_import_btn);
-	import_row->addWidget(m_tiktok_bridge_btn);
 	import_row->addStretch();
 	connection_form->addRow(QString(), import_row);
 	content_layout->addWidget(connection_group);
@@ -258,8 +253,6 @@ void EndpointDialog::setup_ui()
 	        this, &EndpointDialog::on_show_key_toggled);
 	connect(m_import_btn, &QPushButton::clicked,
 	        this, &EndpointDialog::on_import_from_obs);
-	connect(m_tiktok_bridge_btn, &QPushButton::clicked,
-	        this, &EndpointDialog::on_import_tiktok_bridge);
 	connect(m_video_mode_cb, QOverload<int>::of(&QComboBox::currentIndexChanged),
 	        this, &EndpointDialog::on_video_mode_changed);
 	connect(m_audio_mode_cb, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -507,58 +500,6 @@ void EndpointDialog::on_import_from_obs()
 	m_status_label->setText(
 		tr("✓ Connection imported from OBS: %1")
 			.arg(QString::fromStdString(cfg.service_name)));
-	m_status_label->setStyleSheet("color: #2ecc71;");
-	m_status_label->setVisible(true);
-}
-
-void EndpointDialog::on_import_tiktok_bridge()
-{
-	QString path = QString::fromStdString(default_tiktok_bridge_path());
-	if (path.isEmpty() || !QFileInfo::exists(path)) {
-		path = QFileDialog::getOpenFileName(
-			this, tr("Import TikTok Bridge JSON"), path,
-			tr("JSON files (*.json);;All files (*)"));
-		if (path.isEmpty())
-			return;
-	}
-
-	TikTokBridgeConfig cfg = import_tiktok_bridge_file(path.toStdString());
-	if (!cfg.ok) {
-		QMessageBox::warning(
-			this, tr("Import TikTok Bridge"),
-			tr("Could not import TikTok Bridge data:\n\n%1")
-				.arg(QString::fromStdString(cfg.error_message)));
-		return;
-	}
-
-	m_server_edit->setText(QString::fromStdString(cfg.server_url));
-	m_key_edit->setText(QString::fromStdString(cfg.stream_key));
-
-	if (m_name_edit->text().trimmed().isEmpty() ||
-	    m_name_edit->text() == tr("New Endpoint")) {
-		QString bridge_name = QString::fromStdString(cfg.name).trimmed();
-		m_name_edit->setText(bridge_name.isEmpty() ? tr("TikTok Bridge") : bridge_name);
-	}
-
-	/* Safe TikTok defaults: custom H.264 + portrait stretch. */
-	for (int i = 0; i < m_video_mode_cb->count(); ++i)
-		if (m_video_mode_cb->itemData(i).toInt() == static_cast<int>(EncoderSettingsMode::Custom))
-			m_video_mode_cb->setCurrentIndex(i);
-	for (int i = 0; i < m_codec_cb->count(); ++i)
-		if (m_codec_cb->itemData(i).toInt() == static_cast<int>(VideoCodec::H264))
-			m_codec_cb->setCurrentIndex(i);
-	for (int i = 0; i < m_orientation_cb->count(); ++i)
-		if (m_orientation_cb->itemData(i).toInt() ==
-		    static_cast<int>(OutputOrientation::Vertical1080x1920Stretch))
-			m_orientation_cb->setCurrentIndex(i);
-
-	m_bitrate_spin->setValue(2500);
-	for (int i = 0; i < m_audio_cb->count(); ++i)
-		if (m_audio_cb->itemData(i).toInt() == 128)
-			m_audio_cb->setCurrentIndex(i);
-
-	m_status_label->setText(
-		tr("✓ TikTok Bridge imported from %1").arg(QFileInfo(path).fileName()));
 	m_status_label->setStyleSheet("color: #2ecc71;");
 	m_status_label->setVisible(true);
 }
