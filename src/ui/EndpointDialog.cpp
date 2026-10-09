@@ -15,8 +15,15 @@ GPLv2 — see LICENSE for full text.
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QScrollBar>
+#include <QtWidgets/QSizePolicy>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QScreen>
+#include <QtGui/QShowEvent>
 #include <QtCore/QFileInfo>
 #include <QtCore/QUrl>
+
+#include <algorithm>
 
 namespace smulti {
 
@@ -37,7 +44,11 @@ EndpointDialog::EndpointDialog(const Endpoint &ep,
 {
 	setWindowTitle(tr("Endpoint Settings"));
 	setModal(true);
-	setMinimumWidth(620);
+	/* Keep a sensible desktop minimum, but do not force a 620px logical
+	 * width on high-DPI/small work areas. showEvent() clamps the initial
+	 * geometry to the actual monitor work area. */
+	setMinimumWidth(520);
+	setSizeGripEnabled(true);
 	setup_ui();
 	populate_from_endpoint();
 }
@@ -45,33 +56,67 @@ EndpointDialog::EndpointDialog(const Endpoint &ep,
 void EndpointDialog::setup_ui()
 {
 	auto *outer = new QVBoxLayout(this);
-	outer->setContentsMargins(12, 12, 12, 12);
-	outer->setSpacing(10);
+	outer->setContentsMargins(8, 8, 8, 8);
+	outer->setSpacing(8);
+
+	/* All variable-height form content lives inside a scroll area.  The
+	 * action footer remains outside it, so Save/Cancel are always reachable
+	 * even on 768p displays or Windows 125/150% scaling. */
+	m_scroll_area = new QScrollArea(this);
+	m_scroll_area->setWidgetResizable(true);
+	m_scroll_area->setFrameShape(QFrame::NoFrame);
+	m_scroll_area->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+	m_scroll_area->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+	m_scroll_area->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+	m_scroll_area->setMinimumHeight(260);
+
+	auto *content = new QWidget(m_scroll_area);
+	content->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+	auto *content_layout = new QVBoxLayout(content);
+	content_layout->setContentsMargins(0, 0, 4, 0);
+	content_layout->setSpacing(8);
+
+	auto configure_form = [](QFormLayout *form) {
+		form->setContentsMargins(10, 8, 10, 10);
+		form->setHorizontalSpacing(10);
+		form->setVerticalSpacing(6);
+		form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+		form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+	};
+
+	auto configure_combo = [](QComboBox *combo) {
+		combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		/* Long canvas/encoder labels must not dictate the dialog width. */
+		combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+		combo->setMinimumContentsLength(18);
+	};
 
 	/* ---------------- Connection ---------------- */
-	auto *connection_group = new QGroupBox(tr("Connection"), this);
+	auto *connection_group = new QGroupBox(tr("Connection"), content);
 	auto *connection_form = new QFormLayout(connection_group);
-	connection_form->setHorizontalSpacing(12);
-	connection_form->setVerticalSpacing(7);
+	configure_form(connection_form);
 
-	m_name_edit = new QLineEdit(this);
+	m_name_edit = new QLineEdit(connection_group);
 	m_name_edit->setPlaceholderText(tr("e.g. Facebook, Instagram, TikTok"));
 	connection_form->addRow(tr("Name:"), m_name_edit);
 
-	m_template_cb = new QComboBox(this);
+	m_template_cb = new QComboBox(connection_group);
+	configure_combo(m_template_cb);
 	for (const auto &tmpl : s_templates)
 		m_template_cb->addItem(tmpl.label);
 	connection_form->addRow(tr("Platform template:"), m_template_cb);
 
-	m_server_edit = new QLineEdit(this);
+	m_server_edit = new QLineEdit(connection_group);
 	m_server_edit->setPlaceholderText(tr("rtmp://... or rtmps://..."));
 	connection_form->addRow(tr("Server URL:"), m_server_edit);
 
 	auto *key_row = new QHBoxLayout();
-	m_key_edit = new QLineEdit(this);
+	key_row->setContentsMargins(0, 0, 0, 0);
+	key_row->setSpacing(6);
+	m_key_edit = new QLineEdit(connection_group);
 	m_key_edit->setEchoMode(QLineEdit::Password);
 	m_key_edit->setPlaceholderText(tr("Stream key"));
-	m_show_key_btn = new QPushButton(tr("Show"), this);
+	m_show_key_btn = new QPushButton(tr("Show"), connection_group);
 	m_show_key_btn->setCheckable(true);
 	m_show_key_btn->setMinimumWidth(64);
 	key_row->addWidget(m_key_edit, 1);
@@ -79,49 +124,54 @@ void EndpointDialog::setup_ui()
 	connection_form->addRow(tr("Stream key:"), key_row);
 
 	auto *import_row = new QHBoxLayout();
-	m_import_btn = new QPushButton(tr("Import connection from OBS"), this);
+	import_row->setContentsMargins(0, 0, 0, 0);
+	import_row->setSpacing(6);
+	m_import_btn = new QPushButton(tr("Import connection from OBS"), connection_group);
 	m_import_btn->setToolTip(
 		tr("Copies the active OBS profile's server URL and stream key into this endpoint."));
-	m_tiktok_bridge_btn = new QPushButton(tr("Import TikTok Bridge"), this);
+	m_tiktok_bridge_btn = new QPushButton(tr("Import TikTok Bridge"), connection_group);
 	import_row->addWidget(m_import_btn);
 	import_row->addWidget(m_tiktok_bridge_btn);
 	import_row->addStretch();
 	connection_form->addRow(QString(), import_row);
-	outer->addWidget(connection_group);
+	content_layout->addWidget(connection_group);
 
 	/* ---------------- Video ---------------- */
-	auto *video_group = new QGroupBox(tr("Video"), this);
+	auto *video_group = new QGroupBox(tr("Video"), content);
 	auto *video_form = new QFormLayout(video_group);
-	video_form->setHorizontalSpacing(12);
-	video_form->setVerticalSpacing(7);
+	configure_form(video_form);
 
-	m_video_mode_cb = new QComboBox(this);
+	m_video_mode_cb = new QComboBox(video_group);
+	configure_combo(m_video_mode_cb);
 	m_video_mode_cb->addItem(tr("Use OBS streaming encoder settings"),
 	                         static_cast<int>(EncoderSettingsMode::UseOBS));
 	m_video_mode_cb->addItem(tr("Custom settings"),
 	                         static_cast<int>(EncoderSettingsMode::Custom));
 	video_form->addRow(tr("Settings:"), m_video_mode_cb);
 
-	m_codec_cb = new QComboBox(this);
+	m_codec_cb = new QComboBox(video_group);
+	configure_combo(m_codec_cb);
 	m_codec_cb->addItem(tr("H.264 / AVC"), static_cast<int>(VideoCodec::H264));
 	m_codec_cb->addItem(tr("H.265 / HEVC"), static_cast<int>(VideoCodec::HEVC));
 	video_form->addRow(tr("Codec:"), m_codec_cb);
 
-	m_backend_cb = new QComboBox(this);
+	m_backend_cb = new QComboBox(video_group);
+	configure_combo(m_backend_cb);
 	video_form->addRow(tr("Encoder:"), m_backend_cb);
 
-	m_bitrate_spin = new QSpinBox(this);
+	m_bitrate_spin = new QSpinBox(video_group);
 	m_bitrate_spin->setRange(500, 50000);
 	m_bitrate_spin->setSingleStep(500);
 	m_bitrate_spin->setSuffix(tr(" kbps"));
 	video_form->addRow(tr("Video bitrate:"), m_bitrate_spin);
 
-	m_keyint_spin = new QSpinBox(this);
+	m_keyint_spin = new QSpinBox(video_group);
 	m_keyint_spin->setRange(1, 10);
 	m_keyint_spin->setSuffix(tr(" s"));
 	video_form->addRow(tr("Keyframe interval:"), m_keyint_spin);
 
-	m_orientation_cb = new QComboBox(this);
+	m_orientation_cb = new QComboBox(video_group);
+	configure_combo(m_orientation_cb);
 	m_orientation_cb->addItem(
 		tr("Source / match OBS canvas"),
 		static_cast<int>(OutputOrientation::SourceMatch));
@@ -133,50 +183,63 @@ void EndpointDialog::setup_ui()
 		static_cast<int>(OutputOrientation::Vertical1080x1920Rotated));
 	video_form->addRow(tr("Canvas mode:"), m_orientation_cb);
 
-	m_video_hint = new QLabel(this);
+	m_video_hint = new QLabel(video_group);
 	m_video_hint->setWordWrap(true);
+	m_video_hint->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
 	m_video_hint->setStyleSheet("color: palette(mid);");
 	video_form->addRow(QString(), m_video_hint);
-	outer->addWidget(video_group);
+	content_layout->addWidget(video_group);
 
 	/* ---------------- Audio ---------------- */
-	auto *audio_group = new QGroupBox(tr("Audio"), this);
+	auto *audio_group = new QGroupBox(tr("Audio"), content);
 	auto *audio_form = new QFormLayout(audio_group);
-	audio_form->setHorizontalSpacing(12);
-	audio_form->setVerticalSpacing(7);
+	configure_form(audio_form);
 
-	m_audio_mode_cb = new QComboBox(this);
+	m_audio_mode_cb = new QComboBox(audio_group);
+	configure_combo(m_audio_mode_cb);
 	m_audio_mode_cb->addItem(tr("Use OBS streaming audio settings"),
 	                         static_cast<int>(EncoderSettingsMode::UseOBS));
 	m_audio_mode_cb->addItem(tr("Custom AAC"),
 	                         static_cast<int>(EncoderSettingsMode::Custom));
 	audio_form->addRow(tr("Settings:"), m_audio_mode_cb);
 
-	m_audio_cb = new QComboBox(this);
+	m_audio_cb = new QComboBox(audio_group);
+	configure_combo(m_audio_cb);
 	for (int rate : {64, 96, 128, 160, 192, 256, 320})
 		m_audio_cb->addItem(QString("%1 kbps").arg(rate), rate);
 	audio_form->addRow(tr("Audio bitrate:"), m_audio_cb);
-	outer->addWidget(audio_group);
+	content_layout->addWidget(audio_group);
 
 	/* ---------------- Behaviour ---------------- */
-	auto *behavior_group = new QGroupBox(tr("Start / Stop"), this);
+	auto *behavior_group = new QGroupBox(tr("Start / Stop"), content);
 	auto *behavior_layout = new QVBoxLayout(behavior_group);
-	m_linked_cb = new QCheckBox(tr("Start and stop automatically with OBS main stream"), this);
+	behavior_layout->setContentsMargins(10, 8, 10, 10);
+	behavior_layout->setSpacing(5);
+	m_linked_cb = new QCheckBox(
+		tr("Start and stop automatically with OBS main stream"), behavior_group);
 	auto *manual_hint = new QLabel(
 		tr("When automatic start is disabled, a Start/Stop button appears on the endpoint card."),
-		this);
+		behavior_group);
 	manual_hint->setWordWrap(true);
 	manual_hint->setStyleSheet("color: palette(mid);");
 	behavior_layout->addWidget(m_linked_cb);
 	behavior_layout->addWidget(manual_hint);
-	outer->addWidget(behavior_group);
+	content_layout->addWidget(behavior_group);
 
-	m_status_label = new QLabel(this);
+	m_status_label = new QLabel(content);
 	m_status_label->setVisible(false);
 	m_status_label->setWordWrap(true);
-	outer->addWidget(m_status_label);
+	m_status_label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+	content_layout->addWidget(m_status_label);
 
+	content_layout->addStretch(1);
+	m_scroll_area->setWidget(content);
+	outer->addWidget(m_scroll_area, 1);
+
+	/* Sticky footer: never scroll Save/Cancel out of reach. */
 	auto *btn_row = new QHBoxLayout();
+	btn_row->setContentsMargins(2, 0, 2, 0);
+	btn_row->setSpacing(6);
 	m_test_btn = new QPushButton(tr("How to Test"), this);
 	m_save_btn = new QPushButton(tr("Save"), this);
 	m_cancel_btn = new QPushButton(tr("Cancel"), this);
@@ -207,6 +270,43 @@ void EndpointDialog::setup_ui()
 	        this, &EndpointDialog::on_save);
 	connect(m_cancel_btn, &QPushButton::clicked,
 	        this, &QDialog::reject);
+}
+
+void EndpointDialog::showEvent(QShowEvent *event)
+{
+	QDialog::showEvent(event);
+
+	if (m_initial_geometry_applied)
+		return;
+	m_initial_geometry_applied = true;
+
+	QScreen *target_screen = screen();
+	if (!target_screen && parentWidget())
+		target_screen = parentWidget()->screen();
+	if (!target_screen)
+		target_screen = QGuiApplication::primaryScreen();
+	if (!target_screen)
+		return;
+
+	const QRect available = target_screen->availableGeometry();
+
+	/* availableGeometry() is expressed in Qt logical pixels, so this
+	 * automatically respects Windows DPI scaling and the taskbar. */
+	const int edge_margin = 20;
+	const int max_width = std::max(1, available.width() - edge_margin * 2);
+	const int max_height = std::max(1, available.height() - edge_margin * 2);
+
+	const int target_width = std::min(660, max_width);
+	const int target_height = std::min(760, max_height);
+	resize(target_width, target_height);
+
+	/* Center inside the usable work area, not the full physical screen. */
+	QRect centered(QPoint(0, 0), size());
+	centered.moveCenter(available.center());
+	move(centered.topLeft());
+
+	if (m_scroll_area && m_scroll_area->verticalScrollBar())
+		m_scroll_area->verticalScrollBar()->setValue(0);
 }
 
 void EndpointDialog::populate_from_endpoint()
