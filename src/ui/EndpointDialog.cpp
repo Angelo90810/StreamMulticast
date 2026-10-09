@@ -44,10 +44,10 @@ EndpointDialog::EndpointDialog(const Endpoint &ep,
 {
 	setWindowTitle(tr("Endpoint Settings"));
 	setModal(true);
-	/* Keep a sensible desktop minimum, but do not force a 620px logical
-	 * width on high-DPI/small work areas. showEvent() clamps the initial
-	 * geometry to the actual monitor work area. */
-	setMinimumWidth(520);
+	/* Do not impose a fixed logical minimum before we know which monitor
+	 * owns the dialog. showEvent() derives a safe minimum from that monitor's
+	 * usable work area (already DPI-aware in Qt). */
+	setMinimumSize(0, 0);
 	setSizeGripEnabled(true);
 	setup_ui();
 	populate_from_endpoint();
@@ -226,15 +226,17 @@ void EndpointDialog::setup_ui()
 	behavior_layout->addWidget(manual_hint);
 	content_layout->addWidget(behavior_group);
 
-	m_status_label = new QLabel(content);
-	m_status_label->setVisible(false);
-	m_status_label->setWordWrap(true);
-	m_status_label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
-	content_layout->addWidget(m_status_label);
-
 	content_layout->addStretch(1);
 	m_scroll_area->setWidget(content);
 	outer->addWidget(m_scroll_area, 1);
+
+	/* Status belongs to the sticky footer region as well. Import/test
+	 * feedback must be visible immediately, regardless of scroll position. */
+	m_status_label = new QLabel(this);
+	m_status_label->setVisible(false);
+	m_status_label->setWordWrap(true);
+	m_status_label->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+	outer->addWidget(m_status_label);
 
 	/* Sticky footer: never scroll Save/Cancel out of reach. */
 	auto *btn_row = new QHBoxLayout();
@@ -295,6 +297,11 @@ void EndpointDialog::showEvent(QShowEvent *event)
 	const int edge_margin = 20;
 	const int max_width = std::max(1, available.width() - edge_margin * 2);
 	const int max_height = std::max(1, available.height() - edge_margin * 2);
+
+	/* The minimum itself must also fit the work area. This matters on
+	 * 1366x768 panels at 150% scale, where 520 logical px can already be
+	 * wider than the usable window area. */
+	setMinimumWidth(std::min(480, max_width));
 
 	const int target_width = std::min(660, max_width);
 	const int target_height = std::min(760, max_height);
