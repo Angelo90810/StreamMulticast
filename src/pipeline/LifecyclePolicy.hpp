@@ -25,7 +25,8 @@ inline LifecycleDecision decide_lifecycle(bool enabled,
                                           OutputState state,
                                           bool start_blocked,
                                           bool start_requested,
-                                          bool has_session_resources)
+                                          bool has_session_resources,
+                                          ManualOverride manual_override = ManualOverride::Automatic)
 {
 	LifecycleDecision d;
 
@@ -36,6 +37,24 @@ inline LifecycleDecision decide_lifecycle(bool enabled,
 	}
 
 	if (linked_to_main) {
+		/* A manual Stop must not be undone by the 250 ms auto coordinator
+		 * while OBS remains live. A manual Start can transmit independently
+		 * even when OBS's main streaming output is stopped. Both commands
+		 * expire at the next OBS streaming transition. */
+		if (manual_override == ManualOverride::ForceStop) {
+			d.cancel_start_request = true;
+			d.stop = has_session_resources;
+			return d;
+		}
+
+		if (manual_override == ManualOverride::ForceStart) {
+			if (state == OutputState::Idle ||
+			    state == OutputState::Stopping ||
+			    start_blocked || start_requested)
+				d.request_start = true;
+			return d;
+		}
+
 		if (!main_stream_active) {
 			d.cancel_start_request = true;
 			d.stop = has_session_resources;
