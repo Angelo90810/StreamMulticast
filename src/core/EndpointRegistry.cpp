@@ -202,19 +202,27 @@ void EndpointRegistry::update(const Endpoint &ep)
 			 * stream. */
 			ctrl_it->second->set_enabled(ep.enabled);
 
-			/* A queued start belongs to the old auto-link intent. If the
-			 * user unlinks the endpoint while teardown is still pending,
-			 * that stale request must not resurrect it later as a manual
-			 * stream. */
+			/* Runtime manual commands override just one automatic cycle.
+			 * A changed auto-link or enabled setting resets that override,
+			 * so toggling the checkbox cannot leave an invisible Stop
+			 * override stuck on an otherwise enabled endpoint. */
+			if (previous.linked_to_main != ep.linked_to_main ||
+			    previous.enabled != ep.enabled)
+				ctrl_it->second->reset_manual_override();
+
 			if (previous.linked_to_main && !ep.linked_to_main)
 				ctrl_it->second->cancel_start_request();
 		} else {
 			old_was_active = ctrl_it->second->has_active_session();
 			old_needs_handoff = ctrl_it->second->has_session_resources() ||
 			                    ctrl_it->second->start_blocked();
+			const ManualOverride manual_override = ctrl_it->second->manual_override();
 			old_ctrl = std::move(ctrl_it->second);
 
 			replacement = std::make_shared<OutputController>(ep, m_reaper);
+			if (ep.enabled == previous.enabled &&
+			    ep.linked_to_main == previous.linked_to_main)
+				replacement->set_manual_override(manual_override);
 			if (old_needs_handoff)
 				replacement->begin_handoff_wait();
 
