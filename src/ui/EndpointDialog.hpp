@@ -42,7 +42,6 @@ private slots:
 	void on_show_key_toggled(bool visible);
 	void on_test_connection();
 	void on_import_from_obs();
-	void on_import_tiktok_bridge();
 	void on_video_mode_changed(int index);
 	void on_audio_mode_changed(int index);
 	void on_codec_changed(int index);
@@ -66,7 +65,6 @@ private:
 	QLineEdit *m_key_edit {nullptr};
 	QPushButton *m_show_key_btn {nullptr};
 	QPushButton *m_import_btn {nullptr};
-	QPushButton *m_tiktok_bridge_btn {nullptr};
 
 	/* Video */
 	QComboBox *m_video_mode_cb {nullptr};
