@@ -66,12 +66,6 @@ All three run **at the same time**, from the same OBS scene.
 - Fixed the Health tab's uptime column, which previously always showed 0
 - Internal thread-safety hardening around output start/stop/reconnect and health polling
 
-**TikTok Bridge import**
-- **Import TikTok Bridge** button in the Endpoint dialog -- reads local RTMP data from a Bridge JSON file
-- Designed for TikTok's account-gated / ephemeral stream-key workflow
-- StreamMulticast does not generate TikTok keys, perform TikTok login, or bundle third-party generators
-- Default handoff path: `%APPDATA%\obs-studio\plugin_config\streammulticast\tiktok_bridge.json`
-
 ## Roadmap / not implemented
 
 - Arbitrary per-output **resolution + FPS** beyond the built-in source/1080×1920 modes
@@ -112,28 +106,17 @@ Building from source is **only** for contributors who want to modify the code �
 1. Open the **Multistream** dock (`View → Docks → Multistream`)
 2. **Configure** tab → **+ Add Endpoint**
 3. Either click **Import from OBS** to pull the server URL + stream key from your active OBS profile, OR pick a template and paste the stream key manually
-4. For TikTok, optionally click **Import TikTok Bridge** to read a local bridge handoff file
-5. Choose **Canvas mode**:
+4. Choose **Canvas mode**:
    - `Source / match OBS canvas` — normal horizontal output
    - `Vertical 1080×1920 — Stretch to full screen` — fills the portrait frame, intentionally changing aspect ratio
    - `Vertical 1080×1920 — Rotate landscape 90°` — preserves the whole landscape Program output rotated inside a portrait stream
-6. Choose **Use OBS streaming encoder settings** or **Custom settings**. Custom mode supports H.264 and hardware HEVC when available.
-7. Choose whether the endpoint starts/stops with OBS. When automatic linkage is disabled, use the endpoint's own **Start/Stop** button.
-8. Save, then use the **Health** tab to monitor state, bitrate, drops, reconnects and errors.
+5. Choose **Use OBS streaming encoder settings** or **Custom settings**. Custom mode supports H.264 and hardware HEVC when available.
+6. Choose whether the endpoint starts/stops with OBS. When automatic linkage is disabled, use the endpoint's own **Start/Stop** button.
+7. Save, then use the **Health** tab to monitor state, bitrate, drops, reconnects and errors.
 
 **Parallel example:** YouTube can remain on OBS native output while Facebook and Instagram run as independent StreamMulticast endpoints with their own encoder/bitrate/canvas settings.
 
 Pair with [Stream Health Doctor](https://tools.avanatro.com/stream-health/) for deeper per-output telemetry in a separate browser window on a second monitor.
-
-### TikTok Bridge handoff format
-
-Optional helper tools can pass TikTok RTMP data to StreamMulticast with a local JSON handoff. The bundled Windows helper writes the stream key as a **DPAPI-protected** `stream_key_protected` value tied to the current Windows user. Legacy/third-party handoffs using `stream_key`/`key` remain readable for compatibility.
-
-The importer also validates an optional ISO-8601 `expires_at` field and rejects expired credentials instead of attempting a doomed RTMP connection.
-
-A minimal Windows companion script lives in `tools/tiktok-bridge/`. It can write the protected handoff file from prompts, clipboard content, or explicit command-line values, and can optionally start a user-chosen external helper.
-
----
 
 ## Build from source (contributors only)
 
@@ -167,7 +150,7 @@ Output: `build_x64\RelWithDebInfo\streammulticast.dll` (≈230 KB). The install 
 
 ### CI
 
-GitHub Actions builds the currently supported target, **Windows x64**, on every push to `main`. It runs the C++ core regression suite, validates the TikTok bridge helper, checks the OBS package layout, builds a Source Dock-style Inno Setup installer plus ZIP fallback, generates SHA-256 checksums, and publishes a release from an explicit `publish-v*` commit after the build succeeds. Third-party Actions are pinned to immutable commit SHAs. macOS/Linux presets remain contributor scaffolding and are not advertised as supported builds.
+GitHub Actions builds the currently supported target, **Windows x64**, on every push to `main`. It runs the C++ core regression suite and checks the OBS package layout, builds a Source Dock-style Inno Setup installer plus ZIP fallback, generates SHA-256 checksums, and publishes a release from an explicit `publish-v*` commit after the build succeeds. Third-party Actions are pinned to immutable commit SHAs. macOS/Linux presets remain contributor scaffolding and are not advertised as supported builds.
 
 </details>
 
@@ -191,7 +174,6 @@ src/
 │   ├── SecretStore        Windows DPAPI at-rest stream-key protection
 │   ├── EndpointRegistry   In-memory list + observer pattern
 │   ├── ObsServiceImport   Read active OBS profile's stream key (v1.0.6)
-│   └── TikTokBridgeImport Read local TikTok Bridge handoff JSON (v1.0.7)
 ├── pipeline/
 │   ├── EncoderFactory     obs_encoder_create for x264 / NVENC / QSV / AMF
 │   ├── OutputController   1× per endpoint, state machine, reconnect backoff
@@ -209,7 +191,7 @@ src/
 
 StreamMulticast does **not** collect telemetry, contact any servers other than the RTMP endpoints you configure, store data in any cloud, or require an account.
 
-On Windows, StreamMulticast persists endpoint stream keys using **Windows DPAPI (CurrentUser)** in `%APPDATA%\obs-studio\plugin_config\streammulticast\config.json`; the bundled TikTok Bridge helper uses the same protection. Existing plaintext v1/v2 configs are read for compatibility and migrate to protected storage on the next successful save. DPAPI-protected keys are intentionally tied to the Windows user that created them.
+On Windows, StreamMulticast persists endpoint stream keys using **Windows DPAPI (CurrentUser)** in `%APPDATA%\obs-studio\plugin_config\streammulticast\config.json`; Existing plaintext v1/v2 configs are read for compatibility and migrate to protected storage on the next successful save. DPAPI-protected keys are intentionally tied to the Windows user that created them.
 
 ---
 
