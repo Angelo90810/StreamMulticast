@@ -213,7 +213,7 @@ void EndpointDialog::setup_ui()
 	m_linked_cb = new QCheckBox(
 		tr("Start and stop automatically with OBS main stream"), behavior_group);
 	auto *manual_hint = new QLabel(
-		tr("When automatic start is disabled, a Start/Stop button appears on the endpoint card."),
+		tr("Each endpoint always has separate Start and Stop buttons. Manual commands override automatic linking until the next OBS main-stream transition."),
 		behavior_group);
 	manual_hint->setWordWrap(true);
 	manual_hint->setStyleSheet("color: palette(mid);");
@@ -508,7 +508,7 @@ void EndpointDialog::on_test_connection()
 {
 	m_status_label->setText(
 		tr("A real RTMP test necessarily authenticates/publishes to the destination. "
-		   "Disable automatic start, save the endpoint, then use its manual Start button. "
+		   "Save the endpoint, then use its Start button, even with automatic linking enabled. "
 		   "The Health tab shows the actual server result."));
 	m_status_label->setVisible(true);
 }
