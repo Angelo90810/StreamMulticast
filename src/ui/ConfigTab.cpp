@@ -11,7 +11,6 @@ GPLv2 — see LICENSE for full text.
 
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QHBoxLayout>
-#include <QtWidgets/QGridLayout>
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QListWidgetItem>
@@ -29,47 +28,61 @@ EndpointCard::EndpointCard(const Endpoint &ep, QWidget *parent)
 
 void EndpointCard::setup_ui()
 {
+	/* Keep the header and action row in separate horizontal layouts.
+	 * A single QGridLayout used to share columns between On and Delete:
+	 * Delete inherited the checkbox column's tiny width and got clipped,
+	 * while Edit expanded into all remaining space. */
 	setMinimumSize(0, 0);
 	setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 
-	auto *layout = new QGridLayout(this);
-	layout->setContentsMargins(6, 5, 6, 5);
-	layout->setHorizontalSpacing(6);
-	layout->setVerticalSpacing(4);
-	layout->setColumnStretch(1, 1);
+	auto *root = new QVBoxLayout(this);
+	root->setContentsMargins(8, 6, 8, 6);
+	root->setSpacing(5);
+
+	auto *header = new QHBoxLayout();
+	header->setSpacing(8);
 
 	m_status_led = new QLabel(this);
 	m_status_led->setFixedSize(14, 14);
-	layout->addWidget(m_status_led, 0, 0);
+	header->addWidget(m_status_led);
 
 	m_name_label = new QLabel(this);
-	m_name_label->setWordWrap(true);
 	m_name_label->setMinimumWidth(0);
 	m_name_label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-	layout->addWidget(m_name_label, 0, 1);
+	m_name_label->setWordWrap(false);
+	header->addWidget(m_name_label, 1);
 
 	m_enabled_cb = new QCheckBox(tr("On"), this);
-	layout->addWidget(m_enabled_cb, 0, 2);
+	m_enabled_cb->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+	header->addWidget(m_enabled_cb);
+	root->addLayout(header);
 
-	auto flexible_button = [](QPushButton *button) {
-		button->setMinimumWidth(0);
-		button->setMinimumHeight(26);
-		button->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+	auto *actions = new QHBoxLayout();
+	actions->setSpacing(6);
+	actions->addStretch(1);
+
+	auto action_button = [](QPushButton *button) {
+		/* All visible buttons get a readable independent width; no button
+		 * inherits the narrow width of the On checkbox above. */
+		button->setMinimumWidth(76);
+		button->setMaximumWidth(110);
+		button->setMinimumHeight(28);
+		button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 	};
 
 	m_start_stop_btn = new QPushButton(tr("Start"), this);
-	flexible_button(m_start_stop_btn);
+	action_button(m_start_stop_btn);
 	m_start_stop_btn->setToolTip(tr("Start or stop this endpoint independently"));
+	actions->addWidget(m_start_stop_btn);
 
 	m_edit_btn = new QPushButton(tr("Edit"), this);
-	flexible_button(m_edit_btn);
+	action_button(m_edit_btn);
+	actions->addWidget(m_edit_btn);
 
 	m_delete_btn = new QPushButton(tr("Delete"), this);
-	flexible_button(m_delete_btn);
-
-	layout->addWidget(m_start_stop_btn, 1, 0);
-	layout->addWidget(m_edit_btn, 1, 1);
-	layout->addWidget(m_delete_btn, 1, 2);
+	action_button(m_delete_btn);
+	actions->addWidget(m_delete_btn);
+	root->addLayout(actions);
 
 	connect(m_edit_btn, &QPushButton::clicked, this, [this]() {
 		emit editRequested(m_id);
@@ -89,6 +102,7 @@ void EndpointCard::update_state(const Endpoint &ep)
 {
 	m_ep = ep;
 	m_name_label->setText(QString::fromStdString(ep.name));
+	m_name_label->setToolTip(QString::fromStdString(ep.name));
 
 	m_enabled_cb->blockSignals(true);
 	m_enabled_cb->setChecked(ep.enabled);
@@ -202,7 +216,9 @@ void ConfigTab::setup_ui()
 	m_list = new QListWidget(this);
 	m_list->setMinimumSize(0, 0);
 	m_list->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
-	m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+	/* A dock is frequently narrow. List rows must fit its viewport instead
+	 * of widening the list and hiding action buttons behind a horizontal bar. */
+	m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 	m_list->setDragDropMode(QAbstractItemView::InternalMove);
 	m_list->setDefaultDropAction(Qt::MoveAction);
 	m_list->setSelectionMode(QAbstractItemView::NoSelection);
@@ -233,7 +249,7 @@ void ConfigTab::rebuild_list()
 	for (const auto &ep : endpoints) {
 		auto *card = new EndpointCard(ep, nullptr);
 		auto *item = new QListWidgetItem();
-		item->setSizeHint(card->sizeHint());
+		item->setSizeHint(QSize(0, qMax(card->sizeHint().height(), 76)));
 		item->setData(Qt::UserRole, QString::fromStdString(ep.id));
 		m_list->addItem(item);
 		m_list->setItemWidget(item, card);
