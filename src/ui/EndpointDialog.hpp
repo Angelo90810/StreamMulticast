@@ -18,6 +18,9 @@ GPLv2 — see LICENSE for full text.
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QScrollArea>
+
+class QShowEvent;
 
 namespace smulti {
 
@@ -30,6 +33,9 @@ public:
 	                        QWidget *parent = nullptr);
 
 	const Endpoint &result_endpoint() const { return m_result; }
+
+protected:
+	void showEvent(QShowEvent *event) override;
 
 private slots:
 	void on_template_selected(int index);
@@ -83,6 +89,8 @@ private:
 	QPushButton *m_save_btn {nullptr};
 	QPushButton *m_cancel_btn {nullptr};
 	QLabel *m_status_label {nullptr};
+	QScrollArea *m_scroll_area {nullptr};
+	bool m_initial_geometry_applied {false};
 
 	struct ServerTemplate {
 		QString label;
