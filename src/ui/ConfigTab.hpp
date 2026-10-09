@@ -21,6 +21,7 @@ namespace smulti {
 class OutputController;
 
 enum class OutputState : int;
+enum class ManualOverride : int;
 
 class EndpointCard : public QWidget {
 	Q_OBJECT
@@ -29,14 +30,15 @@ public:
 	explicit EndpointCard(const Endpoint &ep, QWidget *parent = nullptr);
 
 	void update_state(const Endpoint &ep);
-	void update_runtime(OutputState state, const std::string &last_error);
+	void update_runtime(OutputState state, const std::string &last_error, ManualOverride manual_override);
 	const std::string &endpoint_id() const { return m_id; }
 
 signals:
 	void editRequested(const std::string &id);
 	void enableToggled(const std::string &id, bool enabled);
 	void deleteRequested(const std::string &id);
-	void manualStartStopRequested(const std::string &id);
+	void manualStartRequested(const std::string &id);
+	void manualStopRequested(const std::string &id);
 
 private:
 	void setup_ui();
@@ -47,7 +49,8 @@ private:
 	QLabel *m_name_label {nullptr};
 	QLabel *m_status_led {nullptr};
 	QCheckBox *m_enabled_cb {nullptr};
-	QPushButton *m_start_stop_btn {nullptr};
+	QPushButton *m_start_btn {nullptr};
+	QPushButton *m_stop_btn {nullptr};
 	QPushButton *m_edit_btn {nullptr};
 	QPushButton *m_delete_btn {nullptr};
 };
@@ -64,7 +67,8 @@ private slots:
 	void on_edit_endpoint(const std::string &id);
 	void on_toggle_endpoint(const std::string &id, bool enabled);
 	void on_delete_endpoint(const std::string &id);
-	void on_manual_start_stop(const std::string &id);
+	void on_manual_start(const std::string &id);
+	void on_manual_stop(const std::string &id);
 	void on_list_reorder();
 	void refresh_runtime_states();
 
