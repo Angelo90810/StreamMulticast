@@ -213,6 +213,62 @@ bool test_lifecycle_policy()
 		if (!check(!d.request_start, "FailedHard must not be hammered by lifecycle timer"))
 			return false;
 	}
+	{
+		auto d = decide_lifecycle(true, true, true, OutputState::Live,
+		                          false, false, true, ManualOverride::ForceStop);
+		if (!check(d.stop && d.cancel_start_request && !d.request_start,
+		           "manual Stop must override linked live output"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, true, true, OutputState::Idle,
+		                          false, false, false, ManualOverride::ForceStop);
+		if (!check(!d.request_start,
+		           "linked coordinator must not restart a manually stopped endpoint"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, true, false, OutputState::Idle,
+		                          false, false, false, ManualOverride::ForceStart);
+		if (!check(d.request_start && !d.stop,
+		           "manual Start must work even when main OBS stream is offline"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, true, false, OutputState::Live,
+		                          false, false, true, ManualOverride::ForceStart);
+		if (!check(!d.stop && !d.cancel_start_request,
+		           "linked manual Start must survive coordinator ticks when OBS is offline"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, true, true, OutputState::Idle,
+		                          false, false, false, ManualOverride::Automatic);
+		if (!check(d.request_start,
+		           "normal automatic behavior must resume after manual override reset"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, true, false, OutputState::Live,
+		                          false, false, true, ManualOverride::Automatic);
+		if (!check(d.stop,
+		           "linked endpoint must stop after automatic behavior resumes"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(false, true, true, OutputState::Live,
+		                          false, true, true, ManualOverride::ForceStart);
+		if (!check(d.stop && d.cancel_start_request && !d.request_start,
+		           "disabled endpoint must never be revived by manual override"))
+			return false;
+	}
+	{
+		auto d = decide_lifecycle(true, true, true, OutputState::FailedHard,
+		                          false, false, true, ManualOverride::ForceStart);
+		if (!check(!d.request_start,
+		           "manual ForceStart must not hammer FailedHard on every tick"))
+			return false;
+	}
 	return true;
 }
 
