@@ -175,6 +175,23 @@ bool test_secret_store()
 }
 
 
+bool test_reconnect_schedule()
+{
+	const int expected[] = {1, 2, 5, 10, 30, 60, 60, 60, 60, 60};
+	for (int attempt = 0; attempt < 10; ++attempt) {
+		if (!check(reconnect_delay_seconds(attempt, 10) == expected[attempt],
+		           "reconnect backoff schedule mismatch"))
+			return false;
+	}
+	if (!check(reconnect_delay_seconds(10, 10) == -1,
+	           "reconnect max-attempt boundary should hard-fail"))
+		return false;
+	if (!check(reconnect_delay_seconds(99, 10) == -1,
+	           "reconnect attempts beyond maximum should hard-fail"))
+		return false;
+	return true;
+}
+
 bool test_lifecycle_policy()
 {
 	{
@@ -282,6 +299,7 @@ int main()
 		test_legacy_and_validation() &&
 		test_secret_store() &&
 		test_undecryptable_secret_preservation() &&
+		test_reconnect_schedule() &&
 		test_lifecycle_policy();
 
 	if (ok)
