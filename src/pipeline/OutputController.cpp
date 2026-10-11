@@ -74,24 +74,6 @@ int encoder_bitrate_kbps(obs_encoder_t *encoder, int fallback)
 } // anonymous namespace
 
 /* -----------------------------------------------------------------------
- * reconnect_delay_seconds — pure function (no libobs dependency, testable)
- *
- * Backoff sequence: 1s / 2s / 5s / 10s / 30s / 60s
- * Returns -1 if attempt >= max_attempts (caller → FailedHard).
- * ----------------------------------------------------------------------- */
-int reconnect_delay_seconds(int attempt, int max_attempts)
-{
-	if (attempt >= max_attempts)
-		return -1;
-
-	static const int schedule[] = {1, 2, 5, 10, 30, 60};
-	constexpr int schedule_len  = static_cast<int>(sizeof(schedule) / sizeof(schedule[0]));
-
-	int idx = attempt < schedule_len ? attempt : (schedule_len - 1);
-	return schedule[idx];
-}
-
-/* -----------------------------------------------------------------------
  * Constructor / Destructor
  * ----------------------------------------------------------------------- */
 OutputController::OutputController(const Endpoint &ep, ControllerReaper &reaper)
