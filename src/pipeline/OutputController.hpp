@@ -75,7 +75,17 @@ enum class ManualOverride : int {
  * Backoff sequence: 1 / 2 / 5 / 10 / 30 / 60 (capped at 60).
  * After max_attempts, returns -1 (caller should go FailedHard).
  */
-int reconnect_delay_seconds(int attempt, int max_attempts = 10);
+inline int reconnect_delay_seconds(int attempt, int max_attempts = 10)
+{
+	if (attempt >= max_attempts)
+		return -1;
+
+	static constexpr int schedule[] = {1, 2, 5, 10, 30, 60};
+	constexpr int schedule_len =
+		static_cast<int>(sizeof(schedule) / sizeof(schedule[0]));
+	const int idx = attempt < schedule_len ? attempt : (schedule_len - 1);
+	return schedule[idx];
+}
 
 /**
  * OutputController — manages one obs_output_t (rtmp_output) for one Endpoint.
