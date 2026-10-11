@@ -33,6 +33,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QAction>
 #include <QTimer>
 #include <memory>
+#include <atomic>
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE("streammulticast", "en-US")
@@ -45,6 +46,7 @@ static std::unique_ptr<smulti::ConfigStore>      g_config_store;
 static std::unique_ptr<smulti::EndpointRegistry> g_registry;
 static std::unique_ptr<smulti::HealthSampler>    g_health_sampler;
 static std::unique_ptr<QTimer>                    g_lifecycle_timer;
+static std::atomic<bool>                          g_exiting {false};
 static smulti::MultistreamDock *                 g_dock = nullptr; /* owned by Qt only if registration succeeded — see obs_module_load */
 
 /* -----------------------------------------------------------------------
@@ -56,7 +58,7 @@ static smulti::MultistreamDock *                 g_dock = nullptr; /* owned by Q
  * ----------------------------------------------------------------------- */
 static void reconcile_output_lifecycle()
 {
-	if (!g_registry)
+	if (!g_registry || g_exiting.load())
 		return;
 
 	const bool main_active = obs_frontend_streaming_active();
@@ -119,12 +121,22 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 				ctrl->refresh_program_scene();
 		}
 	} else if (event == OBS_FRONTEND_EVENT_EXIT) {
-		/* Graceful shutdown — stop all outputs before OBS tears down */
+		/* Freeze automatic reconciliation immediately. OBS may still report
+		 * its main streaming output as active for part of shutdown; without
+		 * this gate the 250 ms timer could try to restart an endpoint after
+		 * we had already stopped it for exit. */
+		g_exiting.store(true);
+		if (g_lifecycle_timer)
+			g_lifecycle_timer->stop();
+
 		obs_log(LOG_INFO, "OBS exit — stopping all StreamMulticast outputs");
 		for (auto &ep : g_registry->all()) {
 			auto ctrl = g_registry->controller_for(ep.id);
-			if (ctrl)
+			if (ctrl) {
+				ctrl->cancel_start_request();
+				ctrl->reset_manual_override();
 				ctrl->stop();
+			}
 		}
 		if (g_health_sampler)
 			g_health_sampler->stop();
@@ -136,6 +148,7 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
  * ----------------------------------------------------------------------- */
 bool obs_module_load()
 {
+	g_exiting.store(false);
 	obs_log(LOG_INFO, "StreamMulticast v%s loading", PLUGIN_VERSION);
 
 	/* 1. Boot the controller reaper first — EndpointRegistry needs it for
@@ -208,6 +221,7 @@ bool obs_module_load()
  * ----------------------------------------------------------------------- */
 void obs_module_unload()
 {
+	g_exiting.store(true);
 	obs_log(LOG_INFO, "StreamMulticast unloading");
 
 	obs_frontend_remove_event_callback(on_frontend_event, nullptr);
