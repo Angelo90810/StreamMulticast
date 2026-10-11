@@ -236,10 +236,9 @@ void OutputController::finish_handoff_wait()
 			m_state = OutputState::Idle;
 	}
 
-	/* Publish the open gate only after state is ready. Do NOT execute a
-	 * deferred start here: this method runs on ControllerReaper's worker
-	 * thread, while cloning OBS-native settings touches frontend APIs.
-	 * ConfigTab's UI timer consumes m_start_requested safely on Qt's thread. */
+	/* Publish the open gate only after state is ready. Deferred starts are
+	 * consumed by the module-owned lifecycle coordinator on the frontend
+	 * thread; the reaper worker never starts outputs itself. */
 	m_start_blocked.store(false);
 }
 
@@ -616,9 +615,42 @@ bool OutputController::start()
 		}
 	}
 
+	/* "Use OBS settings" reads frontend-owned state. Capture it exactly
+	 * once here on the frontend/UI thread, before any reconnect worker can
+	 * exist. The reconnect thread later consumes only these plain C++
+	 * snapshots and never calls obs_frontend_get_streaming_output(). */
+	if (m_endpoint.video_settings_mode == EncoderSettingsMode::UseOBS) {
+		if (!m_factory.capture_obs_video_template(m_obs_video_template)) {
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_state = OutputState::FailedHard;
+			m_last_error = "Could not read OBS streaming video encoder settings";
+			return false;
+		}
+	} else {
+		m_obs_video_template = {};
+	}
+	if (m_endpoint.audio_settings_mode == EncoderSettingsMode::UseOBS) {
+		if (!m_factory.capture_obs_audio_template(m_obs_audio_template)) {
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_state = OutputState::FailedHard;
+			m_last_error = "Could not read OBS streaming audio encoder settings";
+			return false;
+		}
+	} else {
+		m_obs_audio_template = {};
+	}
+
 	/* Create and attach encoders */
-	obs_encoder_t *video_enc = m_factory.create_video_encoder(m_endpoint, "smulti");
-	obs_encoder_t *audio_enc = m_factory.create_audio_encoder(m_endpoint, "smulti");
+	const EncoderTemplate *video_template =
+		m_endpoint.video_settings_mode == EncoderSettingsMode::UseOBS
+			? &m_obs_video_template : nullptr;
+	const EncoderTemplate *audio_template =
+		m_endpoint.audio_settings_mode == EncoderSettingsMode::UseOBS
+			? &m_obs_audio_template : nullptr;
+	obs_encoder_t *video_enc =
+		m_factory.create_video_encoder(m_endpoint, "smulti", video_template);
+	obs_encoder_t *audio_enc =
+		m_factory.create_audio_encoder(m_endpoint, "smulti", audio_template);
 
 	if (!video_enc || !audio_enc) {
 		obs_log(LOG_ERROR, "OutputController [%s]: encoder creation failed",
@@ -835,8 +867,7 @@ void OutputController::stop()
 		}
 
 		/* m_start_requested, if set by a rapid OBS stop→start, is left for
-		 * the Qt-owned ConfigTab timer to consume. Never call frontend-facing
-		 * encoder setup from this reaper worker thread. */
+		 * the module-owned frontend lifecycle coordinator to consume. */
 	});
 }
 
@@ -1198,8 +1229,16 @@ void OutputController::reconnect_thread_func()
 			do_release_encoders_locked();
 		}
 
-		obs_encoder_t *video_enc = m_factory.create_video_encoder(m_endpoint, "smulti");
-		obs_encoder_t *audio_enc = m_factory.create_audio_encoder(m_endpoint, "smulti");
+		const EncoderTemplate *video_template =
+			m_endpoint.video_settings_mode == EncoderSettingsMode::UseOBS
+				? &m_obs_video_template : nullptr;
+		const EncoderTemplate *audio_template =
+			m_endpoint.audio_settings_mode == EncoderSettingsMode::UseOBS
+				? &m_obs_audio_template : nullptr;
+		obs_encoder_t *video_enc =
+			m_factory.create_video_encoder(m_endpoint, "smulti", video_template);
+		obs_encoder_t *audio_enc =
+			m_factory.create_audio_encoder(m_endpoint, "smulti", audio_template);
 
 		if (!video_enc || !audio_enc) {
 			obs_log(LOG_ERROR, "OutputController [%s]: encoder creation failed during reconnect",
