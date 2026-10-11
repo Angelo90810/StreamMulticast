@@ -323,6 +323,12 @@ private:
 	EncoderFactory      m_factory;
 	ControllerReaper   &m_reaper;
 
+	/* OBS-native encoder settings are captured on the frontend/UI thread
+	 * at session start and reused by the reconnect worker. This prevents
+	 * background reconnects from touching OBS frontend objects. */
+	EncoderTemplate     m_obs_video_template;
+	EncoderTemplate     m_obs_audio_template;
+
 	/* Serializes only the short start/stop transition. Heavy teardown still
 	 * runs on ControllerReaper, so the Qt thread never waits on sockets. */
 	mutable std::mutex  m_lifecycle_mutex;
