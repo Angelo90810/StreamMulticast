@@ -129,6 +129,15 @@ size_t EndpointRegistry::count() const
 	return m_endpoints.size();
 }
 
+PersistenceStatus EndpointRegistry::persistence_status() const
+{
+	if (m_store.writes_blocked())
+		return PersistenceStatus::ReadOnlyNewerSchema;
+	if (m_store.last_write_failed())
+		return PersistenceStatus::WriteFailed;
+	return PersistenceStatus::Ok;
+}
+
 /* -----------------------------------------------------------------------
  * add()
  * ----------------------------------------------------------------------- */

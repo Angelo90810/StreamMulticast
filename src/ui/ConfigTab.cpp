@@ -15,6 +15,10 @@ GPLv2 — see LICENSE for full text.
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QListWidgetItem>
 #include <QtCore/QMetaObject>
+#include <QtCore/QTimer>
+
+#include <algorithm>
+#include <cstddef>
 
 namespace smulti {
 
@@ -51,6 +55,20 @@ void EndpointCard::setup_ui()
 	m_name_label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 	m_name_label->setWordWrap(false);
 	header->addWidget(m_name_label, 1);
+
+	/* Explicit reorder controls. Drag-and-drop on the list only works when
+	 * grabbing the thin margin around a card, because the card's own
+	 * widgets consume the mouse press. */
+	auto move_button = [this](const QString &glyph, const QString &tip) {
+		auto *button = new QPushButton(glyph, this);
+		button->setFixedSize(24, 22);
+		button->setToolTip(tip);
+		return button;
+	};
+	m_up_btn = move_button(QString(QChar(0x25B2)), tr("Move up"));
+	m_down_btn = move_button(QString(QChar(0x25BC)), tr("Move down"));
+	header->addWidget(m_up_btn);
+	header->addWidget(m_down_btn);
 
 	m_enabled_cb = new QCheckBox(tr("On"), this);
 	m_enabled_cb->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
@@ -103,6 +121,18 @@ void EndpointCard::setup_ui()
 	connect(m_stop_btn, &QPushButton::clicked, this, [this]() {
 		emit manualStopRequested(m_id);
 	});
+	connect(m_up_btn, &QPushButton::clicked, this, [this]() {
+		emit moveRequested(m_id, -1);
+	});
+	connect(m_down_btn, &QPushButton::clicked, this, [this]() {
+		emit moveRequested(m_id, +1);
+	});
+}
+
+void EndpointCard::set_move_enabled(bool can_move_up, bool can_move_down)
+{
+	m_up_btn->setEnabled(can_move_up);
+	m_down_btn->setEnabled(can_move_down);
 }
 
 void EndpointCard::update_state(const Endpoint &ep)
@@ -214,6 +244,16 @@ void ConfigTab::setup_ui()
 	outer_layout->setContentsMargins(4, 4, 4, 4);
 	outer_layout->setSpacing(4);
 
+	/* Shown only when edits are not reaching config.json. */
+	m_persist_banner = new QLabel(this);
+	m_persist_banner->setWordWrap(true);
+	m_persist_banner->setMinimumWidth(0);
+	m_persist_banner->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+	m_persist_banner->setStyleSheet(
+		"background: #5c2b29; color: #ffffff; border-radius: 4px; padding: 6px;");
+	m_persist_banner->setVisible(false);
+	outer_layout->addWidget(m_persist_banner);
+
 	m_empty_label = new QLabel(this);
 	m_empty_label->setAlignment(Qt::AlignCenter);
 	m_empty_label->setWordWrap(true);
@@ -257,8 +297,12 @@ void ConfigTab::rebuild_list()
 	m_list->setVisible(!empty);
 	m_add_btn->setText(tr("+ Add Endpoint"));
 
+	const int last_index = static_cast<int>(endpoints.size()) - 1;
+	int index = 0;
 	for (const auto &ep : endpoints) {
 		auto *card = new EndpointCard(ep, nullptr);
+		card->set_move_enabled(index > 0, index < last_index);
+		++index;
 		auto *item = new QListWidgetItem();
 		item->setSizeHint(QSize(0, qMax(card->sizeHint().height(), 76)));
 		item->setData(Qt::UserRole, QString::fromStdString(ep.id));
@@ -272,6 +316,8 @@ void ConfigTab::rebuild_list()
 		        this, &ConfigTab::on_manual_start);
 		connect(card, &EndpointCard::manualStopRequested,
 		        this, &ConfigTab::on_manual_stop);
+		connect(card, &EndpointCard::moveRequested,
+		        this, &ConfigTab::on_move_endpoint);
 	}
 	refresh_runtime_states();
 }
@@ -373,10 +419,59 @@ void ConfigTab::on_list_reorder()
 	for (int i = 0; i < m_list->count(); ++i)
 		ordered_ids.push_back(m_list->item(i)->data(Qt::UserRole).toString().toStdString());
 	m_registry.reorder(ordered_ids);
+
+	/* QListWidget's internal move does not reliably carry item widgets
+	 * along, and the ↑/↓ enabled states depend on position. Rebuild the
+	 * cards once the drop event has fully unwound. */
+	QTimer::singleShot(0, this, [this]() { rebuild_list(); });
+}
+
+void ConfigTab::on_move_endpoint(const std::string &id, int delta)
+{
+	const auto endpoints = m_registry.all(); /* sorted by sort_order */
+	std::vector<std::string> ids;
+	ids.reserve(endpoints.size());
+	for (const auto &ep : endpoints)
+		ids.push_back(ep.id);
+
+	const auto it = std::find(ids.begin(), ids.end(), id);
+	if (it == ids.end())
+		return;
+	const auto from = static_cast<std::ptrdiff_t>(it - ids.begin());
+	const auto to = from + delta;
+	if (to < 0 || to >= static_cast<std::ptrdiff_t>(ids.size()))
+		return;
+
+	std::swap(ids[static_cast<size_t>(from)], ids[static_cast<size_t>(to)]);
+	m_registry.reorder(ids);
+
+	/* Deferred: this slot runs inside the clicked() emission of a button
+	 * owned by one of the cards rebuild_list() is about to delete. */
+	QTimer::singleShot(0, this, [this]() { rebuild_list(); });
 }
 
 void ConfigTab::refresh_runtime_states()
 {
+	switch (m_registry.persistence_status()) {
+	case PersistenceStatus::ReadOnlyNewerSchema:
+		m_persist_banner->setText(
+			tr("Settings are read-only: config.json was written by a newer version of "
+			   "StreamMulticast. Changes made here will NOT be saved. Update the plugin "
+			   "to edit endpoints."));
+		m_persist_banner->setVisible(true);
+		break;
+	case PersistenceStatus::WriteFailed:
+		m_persist_banner->setText(
+			tr("The last change could not be saved to disk. Check the OBS log for "
+			   "details; your endpoints keep working for this session."));
+		m_persist_banner->setVisible(true);
+		break;
+	case PersistenceStatus::Ok:
+	default:
+		m_persist_banner->setVisible(false);
+		break;
+	}
+
 	for (int i = 0; i < m_list->count(); ++i) {
 		auto *item = m_list->item(i);
 		auto *card = qobject_cast<EndpointCard *>(m_list->itemWidget(item));

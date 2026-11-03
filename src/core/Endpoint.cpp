@@ -70,8 +70,9 @@ Endpoint Endpoint::make_default(const std::string &name)
 	return ep;
 }
 
-obs_data_t *Endpoint::serialize() const
+obs_data_t *Endpoint::serialize(bool *secret_protection_failed) const
 {
+	(void)secret_protection_failed; /* only written on Windows */
 	obs_data_t *data = obs_data_create();
 
 	obs_data_set_string(data, "id", id.c_str());
@@ -89,9 +90,18 @@ obs_data_t *Endpoint::serialize() const
 		if (protect_secret(stream_key, protected_key)) {
 			obs_data_set_string(data, "stream_key_protected", protected_key.c_str());
 		} else {
+#ifdef _WIN32
+			/* DPAPI is available on every supported Windows build, so a
+			 * failure here is exceptional. Never downgrade to plaintext:
+			 * omit the key and let ConfigStore keep the previous
+			 * (protected) file instead of overwriting it. */
+			if (secret_protection_failed)
+				*secret_protection_failed = true;
+#else
 			/* Non-Windows compatibility path until native keychain backends
 			 * are implemented. Existing configs remain readable everywhere. */
 			obs_data_set_string(data, "stream_key", stream_key.c_str());
+#endif
 		}
 	}
 

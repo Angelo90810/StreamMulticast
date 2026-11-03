@@ -1,6 +1,6 @@
 # StreamMulticast
 
-**Current release:** v1.1.5 for OBS Studio 32.2.2 (Windows x64).
+**Current release:** v1.1.10 for OBS Studio 32.2.2 (Windows x64).
 
 > Multi-destination streaming for OBS Studio on **Windows x64** — **per-output bitrate**, **per-output orientation** (horizontal + vertical in parallel), free, open-source, no account, no cloud.
 
@@ -39,7 +39,7 @@ All three run **at the same time**, from the same OBS scene.
 
 ### v1.0 — Core multistream
 - **Multi-RTMP output** — N endpoints, no hard limit
-- **Per-endpoint encoder + bitrate** — x264 / NVENC / QSV / AMF, video bitrate 500-25000 kbit/s, audio bitrate 64-320 kbit/s, keyframe interval 1-10 s
+- **Per-endpoint encoder + bitrate** — x264 / NVENC / QSV / AMF, video bitrate 500-50000 kbit/s, audio bitrate 64-320 kbit/s, keyframe interval 1-10 s
 - **Live Health view** — per-output actual bitrate, dropped frames, reconnect count, uptime in a real-time grid inside the OBS dock (2 Hz polling)
 - **Coexistence with OBS native streaming** — Twitch markers, replay buffer and recording stay untouched
 - **Auto-reconnect with backoff** — 1s / 2s / 5s / 10s / 30s / 60s, max 10 attempts before hard-fail

@@ -29,10 +29,17 @@ class ControllerReaper;
  */
 enum class ChangeKind { Added, Removed, Updated };
 
+/** Whether configuration changes are actually reaching disk. */
+enum class PersistenceStatus {
+	Ok,
+	ReadOnlyNewerSchema, ///< config.json was written by a newer plugin; edits are not saved
+	WriteFailed,         ///< the last write failed (I/O or key protection)
+};
+
 /**
  * Observer callback type.
- * Called on the Qt UI thread via QMetaObject::invokeMethod when the registry
- * changes.  Observers must not hold the registry mutex when called.
+ * Called synchronously on the mutating thread, never with the registry
+ * mutex held. Observers that touch widgets must re-post to the Qt thread.
  */
 using RegistryObserver = std::function<void(ChangeKind, const Endpoint &)>;
 
@@ -46,8 +53,9 @@ using RegistryObserver = std::function<void(ChangeKind, const Endpoint &)>;
  * see controller_for().  Notifies registered UI observers on every change.
  *
  * Thread-safety: all mutating methods are guarded by an internal mutex.
- * Observer callbacks are invoked via Qt's queued connection to guarantee
- * they run on the UI thread.
+ * Observer callbacks are invoked synchronously on the calling thread,
+ * without the mutex held; UI observers re-post to the Qt thread themselves
+ * (see ConfigTab's QueuedConnection).
  *
  * Controller teardown: remove()/update() extract the OLD OutputController
  * shared_ptr from the map WHILE HOLDING m_mutex, release the lock, and only
@@ -93,6 +101,9 @@ public:
 
 	/** Number of registered endpoints */
 	size_t count() const;
+
+	/** Save health of the backing ConfigStore, for the Configure tab. */
+	PersistenceStatus persistence_status() const;
 
 	/* ---- Mutation ---- */
 

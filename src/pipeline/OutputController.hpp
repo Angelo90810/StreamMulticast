@@ -322,6 +322,18 @@ private:
 
 	/** Assumes m_mutex is already held by the caller. */
 	void do_release_encoders_locked();
+
+	/**
+	 * After a session ends in FailedHard (rejected key, bad URL, reconnect
+	 * budget exhausted), hand a job to the ControllerReaper that waits for
+	 * libobs to report the output inactive, detaches the output-owned
+	 * encoder references, releases ours and destroys the rotated view.
+	 * Without this a dead endpoint keeps an NVENC session and, in rotated
+	 * mode, a 1080x1920 render mix alive until the user retries/deletes it.
+	 * The output, service and signal handlers are kept so a manual Start
+	 * can reuse them exactly as before.
+	 */
+	void schedule_failed_session_cleanup(obs_output_t *output);
 	bool do_create_output();
 
 	/** Configure normal/stretch/rotated video source for a fresh encoder. */
