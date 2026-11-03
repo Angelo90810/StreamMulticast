@@ -337,6 +337,18 @@ void EndpointDialog::populate_from_endpoint()
 	refresh_backend_choices(m_endpoint.encoder_backend);
 
 	set_data(m_audio_mode_cb, static_cast<int>(m_endpoint.audio_settings_mode));
+
+	/* A hand-edited or older config may hold a bitrate that is not one of
+	 * the presets. Offer it instead of silently saving 64 kbps. */
+	if (m_audio_cb->findData(m_endpoint.audio_bitrate_kbps) < 0) {
+		int insert_at = 0;
+		while (insert_at < m_audio_cb->count() &&
+		       m_audio_cb->itemData(insert_at).toInt() < m_endpoint.audio_bitrate_kbps)
+			++insert_at;
+		m_audio_cb->insertItem(insert_at,
+		                       QString("%1 kbps").arg(m_endpoint.audio_bitrate_kbps),
+		                       m_endpoint.audio_bitrate_kbps);
+	}
 	set_data(m_audio_cb, m_endpoint.audio_bitrate_kbps);
 	set_data(m_orientation_cb, static_cast<int>(m_endpoint.orientation));
 
@@ -351,6 +363,16 @@ void EndpointDialog::populate_from_endpoint()
 	m_template_cb->blockSignals(false);
 
 	refresh_mode_controls();
+
+	if (m_endpoint.stream_key_decryption_failed && m_endpoint.stream_key.empty()) {
+		m_key_edit->setPlaceholderText(tr("Re-enter the stream key"));
+		m_status_label->setText(
+			tr("The saved stream key could not be decrypted under this Windows user "
+			   "(for example, the OBS profile was copied from another account). "
+			   "Paste the key again to keep using this endpoint."));
+		m_status_label->setStyleSheet("color: #e67e22;");
+		m_status_label->setVisible(true);
+	}
 }
 
 void EndpointDialog::refresh_backend_choices(EncoderBackend preferred)
@@ -409,8 +431,10 @@ Endpoint EndpointDialog::collect_from_form() const
 	Endpoint ep = m_endpoint;
 	ep.name = m_name_edit->text().trimmed().toStdString();
 	ep.server_url = m_server_edit->text().trimmed().toStdString();
-	/* Validate with trimmed() but preserve the exact key bytes entered. */
-	ep.stream_key = m_key_edit->text().toStdString();
+	/* Stream keys never contain leading/trailing whitespace, but a pasted
+	 * key often carries a trailing space or newline, which the server then
+	 * rejects as "Invalid stream key". Store exactly what was validated. */
+	ep.stream_key = m_key_edit->text().trimmed().toStdString();
 	if (!ep.stream_key.empty()) {
 		ep.stream_key_decryption_failed = false;
 		ep.preserved_protected_stream_key.clear();

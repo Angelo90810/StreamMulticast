@@ -99,7 +99,13 @@ struct Endpoint {
 	/* Ordering */
 	int sort_order = 0;
 
-	obs_data_t *serialize() const;
+	/**
+	 * Serialize for config.json. On Windows the stream key is always
+	 * DPAPI-protected; if protection fails the key is omitted (never
+	 * written as plaintext) and `*secret_protection_failed` is set so the
+	 * caller can refuse to replace the previous, still-protected file.
+	 */
+	obs_data_t *serialize(bool *secret_protection_failed = nullptr) const;
 	static Endpoint deserialize(obs_data_t *data);
 	static std::string generate_uuid();
 	static Endpoint make_default(const std::string &name = "New Endpoint");

@@ -57,9 +57,14 @@ bool test_endpoint_roundtrip()
 	in.linked_to_main = false;
 	in.sort_order = 7;
 
-	obs_data_t *data = in.serialize();
+	bool protection_failed = false;
+	obs_data_t *data = in.serialize(&protection_failed);
 	if (!check(data != nullptr, "Endpoint::serialize returned null"))
 		return false;
+	if (!check(!protection_failed, "serialize reported a key-protection failure")) {
+		obs_data_release(data);
+		return false;
+	}
 
 #ifdef _WIN32
 	if (!check(obs_data_has_user_value(data, "stream_key_protected"),

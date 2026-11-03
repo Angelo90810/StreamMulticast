@@ -32,6 +32,7 @@ public:
 	void update_state(const Endpoint &ep);
 	void update_runtime(OutputState state, const std::string &last_error, ManualOverride manual_override);
 	const std::string &endpoint_id() const { return m_id; }
+	void set_move_enabled(bool can_move_up, bool can_move_down);
 
 signals:
 	void editRequested(const std::string &id);
@@ -39,6 +40,7 @@ signals:
 	void deleteRequested(const std::string &id);
 	void manualStartRequested(const std::string &id);
 	void manualStopRequested(const std::string &id);
+	void moveRequested(const std::string &id, int delta);
 
 private:
 	void setup_ui();
@@ -49,6 +51,8 @@ private:
 	QLabel *m_name_label {nullptr};
 	QLabel *m_status_led {nullptr};
 	QCheckBox *m_enabled_cb {nullptr};
+	QPushButton *m_up_btn {nullptr};
+	QPushButton *m_down_btn {nullptr};
 	QPushButton *m_start_btn {nullptr};
 	QPushButton *m_stop_btn {nullptr};
 	QPushButton *m_edit_btn {nullptr};
@@ -70,6 +74,7 @@ private slots:
 	void on_manual_start(const std::string &id);
 	void on_manual_stop(const std::string &id);
 	void on_list_reorder();
+	void on_move_endpoint(const std::string &id, int delta);
 	void refresh_runtime_states();
 
 private:
@@ -80,6 +85,7 @@ private:
 	EndpointRegistry &m_registry;
 	QListWidget *m_list {nullptr};
 	QLabel *m_empty_label {nullptr};
+	QLabel *m_persist_banner {nullptr};
 	QPushButton *m_add_btn {nullptr};
 	QTimer *m_runtime_timer {nullptr};
 

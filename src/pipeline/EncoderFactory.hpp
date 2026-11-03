@@ -69,6 +69,19 @@ private:
 	static bool is_encoder_available(const std::string &type_id);
 	static std::string resolve_encoder_type(EncoderBackend backend, VideoCodec codec);
 
+	/* Live path: snapshot the encoders attached to OBS's streaming output.
+	 * That output only exists after the first Start Streaming of the
+	 * session and is recreated whenever Settings → Output is applied, so
+	 * a manual endpoint frequently finds it missing. */
+	static bool capture_live_video_template(EncoderTemplate &out);
+	static bool capture_live_audio_template(EncoderTemplate &out);
+
+	/* Profile path: rebuild the same template from the active profile's
+	 * basic.ini + streamEncoder.json, mirroring OBS's own Simple/Advanced
+	 * output handlers. Used when the live output is unavailable. */
+	static bool capture_profile_video_template(EncoderTemplate &out);
+	static bool capture_profile_audio_template(EncoderTemplate &out);
+
 	obs_encoder_t *clone_obs_video_encoder(const Endpoint &ep,
 	                                       const std::string &name_hint,
 	                                       const EncoderTemplate &templ) const;

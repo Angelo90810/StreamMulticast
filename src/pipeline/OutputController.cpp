@@ -17,6 +17,7 @@ GPLv2 — see LICENSE for full text.
 #include <util/threading.h>
 #include <graphics/vec2.h>
 
+#include <algorithm>
 #include <chrono>
 #include <thread>
 #include <cassert>
@@ -329,15 +330,29 @@ void OutputController::refresh_program_scene()
 	 * obs_frontend_get_current_scene(), it preserves transition animation
 	 * and the exact Program output in Studio Mode. */
 	obs_source_t *program = obs_get_output_source(0);
-	if (!program)
+	if (!program) {
+		/* Scene-collection teardown clears channel 0. Drop our item so the
+		 * private scene stops holding the old transition alive. */
+		if (m_rotated_item) {
+			obs_sceneitem_remove(m_rotated_item);
+			m_rotated_item = nullptr;
+		}
 		return;
-
-	if (m_rotated_item) {
-		obs_sceneitem_remove(m_rotated_item);
-		m_rotated_item = nullptr;
 	}
 
-	m_rotated_item = obs_scene_add(m_rotated_scene, program);
+	/* Channel 0 is the transition source; an ordinary scene switch keeps
+	 * the same object. Rebuilding the item on every scene change was pure
+	 * churn and could drop a frame on the vertical output, so only swap it
+	 * when the channel-0 source itself changed. The transform is reapplied
+	 * either way (cheap) in case the canvas size changed. */
+	if (!m_rotated_item || obs_sceneitem_get_source(m_rotated_item) != program) {
+		if (m_rotated_item) {
+			obs_sceneitem_remove(m_rotated_item);
+			m_rotated_item = nullptr;
+		}
+		m_rotated_item = obs_scene_add(m_rotated_scene, program);
+	}
+
 	if (m_rotated_item) {
 		struct obs_video_info main_ovi = {};
 		obs_get_video_info(&main_ovi);
@@ -346,16 +361,27 @@ void OutputController::refresh_program_scene()
 		const float source_h = main_ovi.base_height > 0 ? static_cast<float>(main_ovi.base_height) : 1080.0f;
 
 		/* After +90deg rotation, source_h becomes portrait width and
-		 * source_w becomes portrait height. Scale each axis to exactly fill
-		 * 1080x1920 without cropping the landscape composition. */
+		 * source_w becomes portrait height. One uniform scale keeps the
+		 * composition's aspect ratio: 16:9 canvases fill 1080x1920 exactly,
+		 * other ratios (16:10, 21:9, ...) are centred with black bars
+		 * instead of being stretched. */
+		const float s = std::min(1080.0f / source_h, 1920.0f / source_w);
+		const float content_w = source_h * s; /* portrait width  */
+		const float content_h = source_w * s; /* portrait height */
+		const float offset_x = (1080.0f - content_w) * 0.5f;
+		const float offset_y = (1920.0f - content_h) * 0.5f;
+
 		struct vec2 scale;
-		vec2_set(&scale, 1080.0f / source_h, 1920.0f / source_w);
+		vec2_set(&scale, s, s);
 		obs_sceneitem_set_scale(m_rotated_item, &scale);
 		obs_sceneitem_set_alignment(m_rotated_item, OBS_ALIGN_LEFT | OBS_ALIGN_TOP);
 		obs_sceneitem_set_rot(m_rotated_item, 90.0f);
 
+		/* +90deg around the top-left anchor: the item extends to the LEFT
+		 * of pos.x and DOWN from pos.y, so anchor at the right edge of the
+		 * centred content box. For 16:9 this is exactly (1080, 0). */
 		struct vec2 pos;
-		vec2_set(&pos, 1080.0f, 0.0f);
+		vec2_set(&pos, offset_x + content_w, offset_y);
 		obs_sceneitem_set_pos(m_rotated_item, &pos);
 	}
 
@@ -984,6 +1010,72 @@ void OutputController::do_release_encoders_locked()
 }
 
 /* -----------------------------------------------------------------------
+ * schedule_failed_session_cleanup — see the declaration's doc comment.
+ *
+ * Lifetime of `output` inside the job: the pointer can only be released by
+ * stop()'s teardown job or by shutdown_blocking(), and both of those run on
+ * this same single, FIFO ControllerReaper thread. While this job runs, no
+ * later job can free the output, so querying it here is safe even after
+ * stop() has detached it from the controller — the identity check below
+ * then simply makes the job a no-op.
+ * ----------------------------------------------------------------------- */
+void OutputController::schedule_failed_session_cleanup(obs_output_t *output)
+{
+	if (!output)
+		return;
+
+	std::weak_ptr<OutputController> weak = weak_from_this();
+	m_reaper.enqueue([weak, output]() {
+		auto self = weak.lock();
+		if (!self)
+			return;
+
+		auto still_failed = [&self, output]() {
+			std::lock_guard<std::mutex> lock(self->m_mutex);
+			return self->m_output == output && self->m_state == OutputState::FailedHard;
+		};
+
+		/* signal_stop() fires before libobs clears the output's active flag
+		 * and encoder detach is ignored while active. Wait OUTSIDE the
+		 * lifecycle mutex so a user clicking Start is never blocked by it. */
+		bool inactive = false;
+		for (int waited_ms = 0; waited_ms < REATTACH_WAIT_TIMEOUT_MS;
+		     waited_ms += REATTACH_POLL_MS) {
+			if (!still_failed())
+				return;
+			if (!obs_output_active(output)) {
+				inactive = true;
+				break;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(REATTACH_POLL_MS));
+		}
+		if (!inactive)
+			return;
+
+		/* Serialize with start()/stop(): a manual retry that already began
+		 * owns the session, and the re-check below then skips the cleanup. */
+		std::lock_guard<std::mutex> lifecycle_lock(self->m_lifecycle_mutex);
+		if (!still_failed() || obs_output_active(output))
+			return;
+
+		obs_output_set_video_encoder(output, nullptr);
+		obs_output_set_audio_encoder(output, nullptr, 0);
+		{
+			std::lock_guard<std::mutex> lock(self->m_mutex);
+			self->do_release_encoders_locked();
+		}
+
+		/* No encoder references the rotated mix any more; start() rebuilds
+		 * it on the next attempt via configure_video_pipeline(). */
+		self->destroy_rotated_pipeline();
+
+		obs_log(LOG_INFO,
+		        "OutputController [%s]: released encoders/render view of failed session",
+		        self->m_endpoint.name.c_str());
+	});
+}
+
+/* -----------------------------------------------------------------------
  * Signal callbacks — called on OBS's internal signal thread
  * ----------------------------------------------------------------------- */
 void OutputController::on_start_signal(void *data, calldata_t * /*cd*/)
@@ -1031,11 +1123,16 @@ void OutputController::handle_stop(int code)
 		}
 		const char *err = output ? obs_output_get_last_error(output) : nullptr;
 
-		std::lock_guard<std::mutex> lock(m_mutex);
-		m_last_error = (err && *err) ? err : hard_fail_message(code);
-		m_state      = OutputState::FailedHard;
-		obs_log(LOG_ERROR, "OutputController [%s]: hard failure (code=%d) — %s",
-		        m_endpoint.name.c_str(), code, m_last_error.c_str());
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_last_error = (err && *err) ? err : hard_fail_message(code);
+			m_state      = OutputState::FailedHard;
+			obs_log(LOG_ERROR, "OutputController [%s]: hard failure (code=%d) — %s",
+			        m_endpoint.name.c_str(), code, m_last_error.c_str());
+		}
+
+		/* Non-blocking: this runs on the OBS output thread. */
+		schedule_failed_session_cleanup(output);
 		return;
 	}
 
@@ -1121,23 +1218,25 @@ void OutputController::reconnect_thread_func()
 			obs_log(LOG_ERROR, "OutputController [%s]: max reconnect attempts reached — FailedHard",
 			        m_endpoint.name.c_str());
 
-			/* A failed reconnect can leave the final encoder pair attached
-			 * to an inactive output. Detach it before giving up so a dead
-			 * endpoint does not permanently consume a hardware encoder
-			 * session until the user manually retries/deletes it. */
-			if (!obs_output_active(captured_output) && !session_changed()) {
-				obs_output_set_video_encoder(captured_output, nullptr);
-				obs_output_set_audio_encoder(captured_output, nullptr, 0);
+			bool failed = false;
+			{
+				std::lock_guard<std::mutex> lock(m_mutex);
+				if (m_output == captured_output) {
+					m_effective_video_bitrate_kbps = -1;
+					m_effective_audio_bitrate_kbps = -1;
+					m_state      = OutputState::FailedHard;
+					m_last_error = "Max reconnect attempts reached";
+					failed = true;
+				}
 			}
 
-			std::lock_guard<std::mutex> lock(m_mutex);
-			if (m_output == captured_output) {
-				do_release_encoders_locked();
-				m_effective_video_bitrate_kbps = -1;
-				m_effective_audio_bitrate_kbps = -1;
-				m_state      = OutputState::FailedHard;
-				m_last_error = "Max reconnect attempts reached";
-			}
+			/* A failed reconnect can leave the final encoder pair attached
+			 * to the output. The shared FailedHard cleanup detaches it once
+			 * libobs reports the output inactive, so a dead endpoint does
+			 * not keep a hardware encoder session (or the rotated render
+			 * mix) until the user manually retries/deletes it. */
+			if (failed)
+				schedule_failed_session_cleanup(captured_output);
 			return;
 		}
 

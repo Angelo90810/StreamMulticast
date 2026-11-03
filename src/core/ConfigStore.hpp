@@ -80,6 +80,11 @@ public:
 	/** True when a newer config schema was loaded read-only. */
 	bool writes_blocked() const { return m_writes_blocked.load(); }
 
+	/** True when the most recent write attempt did not reach disk
+	 * (I/O error, or a stream key could not be protected). Cleared by the
+	 * next successful write. Surfaced in the Configure tab. */
+	bool last_write_failed() const { return m_last_write_failed.load(); }
+
 private:
 	/** Resolve (and create) the plugin config directory, returning the full path */
 	static std::string resolve_config_path();
@@ -89,6 +94,9 @@ private:
 
 	/** Low-level read — deserialises JSON from path into endpoint list */
 	bool read_from_disk(const std::string &path, std::vector<Endpoint> &out);
+
+	/** Copy an unreadable config aside before it can be overwritten. */
+	static void preserve_unreadable_config(const std::string &path);
 
 	/** Migrate schema from older versions */
 	void migrate(int from_version, std::vector<Endpoint> &endpoints);
@@ -105,6 +113,11 @@ private:
 	/* A config written by a newer plugin version may contain fields this
 	 * build cannot round-trip. Load known fields, but never overwrite it. */
 	std::atomic<bool>                    m_writes_blocked{false};
+	std::atomic<bool>                    m_last_write_failed{false};
+	/* Set when a pre-v3 config with plaintext keys was loaded on Windows.
+	 * The first protected save rotates that plaintext file into .bak, so a
+	 * second save is issued once to push it out of the backup too. */
+	bool                                 m_flush_legacy_backup{false};
 	std::atomic<bool>                    m_save_pending{false};
 	std::atomic<uint64_t>                m_save_generation{0};
 	uint64_t                             m_pending_generation{0};

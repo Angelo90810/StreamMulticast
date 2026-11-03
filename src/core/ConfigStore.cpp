@@ -41,10 +41,8 @@ ConfigStore::~ConfigStore()
 /* -----------------------------------------------------------------------
  * Path resolution
  *
- * AVANATRO-VERIFY: obs_module_get_config_path — the returned char* must
- * be freed with bfree().  Confirm API in OBS 31.x.
- * Also verify that the path is created automatically or if we need
- * os_mkdirs().
+ * obs_module_get_config_path() returns a bmalloc'd string (bfree it) and
+ * does not create the directory, hence the os_mkdirs() below.
  * ----------------------------------------------------------------------- */
 std::string ConfigStore::resolve_config_path()
 {
@@ -73,6 +71,24 @@ std::string ConfigStore::resolve_config_path()
 }
 
 /* -----------------------------------------------------------------------
+ * preserve_unreadable_config()
+ * ----------------------------------------------------------------------- */
+void ConfigStore::preserve_unreadable_config(const std::string &path)
+{
+	const long long stamp = static_cast<long long>(
+		std::chrono::duration_cast<std::chrono::seconds>(
+			std::chrono::system_clock::now().time_since_epoch()).count());
+
+	for (const std::string &src : {path, path + ".bak"}) {
+		if (!os_file_exists(src.c_str()))
+			continue;
+		const std::string dst = src + ".corrupt-" + std::to_string(stamp);
+		if (os_copyfile(src.c_str(), dst.c_str()) != 0)
+			obs_log(LOG_WARNING, "ConfigStore: could not preserve %s", src.c_str());
+	}
+}
+
+/* -----------------------------------------------------------------------
  * load()
  * ----------------------------------------------------------------------- */
 bool ConfigStore::load()
@@ -84,9 +100,20 @@ bool ConfigStore::load()
 		return false;
 	}
 
+	const bool file_existed = os_file_exists(m_config_path.c_str());
+
 	std::vector<Endpoint> loaded;
 	if (!read_from_disk(m_config_path, loaded)) {
-		obs_log(LOG_INFO, "ConfigStore: config.json not found or corrupt — starting fresh");
+		if (file_existed) {
+			/* Both config.json and its .bak were unreadable. The next save
+			 * would replace them with an empty list, so keep a copy the
+			 * user (or support) can still recover endpoints from. */
+			preserve_unreadable_config(m_config_path);
+			obs_log(LOG_WARNING, "ConfigStore: config.json is corrupt — starting fresh "
+			                     "(a copy was kept next to it as config.json.corrupt-*)");
+		} else {
+			obs_log(LOG_INFO, "ConfigStore: no config.json yet — starting fresh");
+		}
 		m_endpoints.clear();
 		return false;
 	}
@@ -228,32 +255,49 @@ std::vector<Endpoint> ConfigStore::endpoints() const
 
 /* -----------------------------------------------------------------------
  * write_to_disk — serialise endpoint list to JSON
- *
- * AVANATRO-VERIFY: obs_data_save_json — confirm function name in OBS 31.x
- * (was obs_data_save_json() in OBS 29-30, may be obs_data_save_json_safe()
- * in newer builds).  Use obs_data_save_json_safe with tmp/bak files.
  * ----------------------------------------------------------------------- */
 bool ConfigStore::write_to_disk(const std::vector<Endpoint> &endpoints, const std::string &path)
 {
 	obs_data_t *root = obs_data_create();
 	obs_data_set_int(root, "schema_version", CURRENT_SCHEMA_VERSION);
 
+	bool secret_protection_failed = false;
 	obs_data_array_t *arr = obs_data_array_create();
 	for (const auto &ep : endpoints) {
-		obs_data_t *ep_data = ep.serialize();
+		obs_data_t *ep_data = ep.serialize(&secret_protection_failed);
 		obs_data_array_push_back(arr, ep_data);
 		obs_data_release(ep_data); // array addref'd — safe to release our handle
 	}
 	obs_data_set_array(root, "endpoints", arr);
 	obs_data_array_release(arr);
 
-	// AVANATRO-VERIFY: obs_data_save_json_safe signature and availability in OBS 31.x.
-	// The safe variant writes to .tmp then renames, preventing corruption on crash.
+	if (secret_protection_failed) {
+		/* Writing now would either leak a key (plaintext) or lose it. Keep
+		 * the previous file untouched and report the failure instead. */
+		obs_log(LOG_ERROR, "ConfigStore: could not protect a stream key with DPAPI — "
+		                   "config.json was not updated");
+		obs_data_release(root);
+		m_last_write_failed.store(true);
+		return false;
+	}
+
+	/* The safe variant writes to .tmp then renames, preventing corruption
+	 * on crash, and rotates the previous file into .bak. */
 	bool ok = obs_data_save_json_safe(root, path.c_str(), "tmp", "bak");
 	if (!ok)
 		obs_log(LOG_WARNING, "ConfigStore: obs_data_save_json_safe failed for %s", path.c_str());
 
+	if (ok && m_flush_legacy_backup) {
+		/* The .bak now holds the pre-v3 file with plaintext keys. Save once
+		 * more so the backup is the protected copy we just wrote. */
+		if (obs_data_save_json_safe(root, path.c_str(), "tmp", "bak")) {
+			m_flush_legacy_backup = false;
+			obs_log(LOG_INFO, "ConfigStore: replaced legacy plaintext backup with protected copy");
+		}
+	}
+
 	obs_data_release(root);
+	m_last_write_failed.store(!ok);
 	return ok;
 }
 
@@ -265,8 +309,6 @@ bool ConfigStore::read_from_disk(const std::string &path, std::vector<Endpoint> 
 	if (path.empty() || !os_file_exists(path.c_str()))
 		return false;
 
-	// AVANATRO-VERIFY: obs_data_create_from_json_file — confirm it returns nullptr on
-	// missing file vs. empty/corrupt file, and whether it logs internally.
 	/* Pair safe writes with safe reads so a truncated/corrupt primary file
 	 * automatically falls back to the .bak generated by save_json_safe(). */
 	obs_data_t *root = obs_data_create_from_json_file_safe(path.c_str(), "bak");
@@ -305,8 +347,17 @@ bool ConfigStore::read_from_disk(const std::string &path, std::vector<Endpoint> 
 
 	obs_data_array_release(arr);
 
-	if (schema_version < CURRENT_SCHEMA_VERSION)
+	if (schema_version < CURRENT_SCHEMA_VERSION) {
+#ifdef _WIN32
+		for (const auto &ep : out) {
+			if (!ep.stream_key.empty()) {
+				m_flush_legacy_backup = true;
+				break;
+			}
+		}
+#endif
 		migrate(schema_version, out);
+	}
 
 	obs_data_release(root);
 	return true;

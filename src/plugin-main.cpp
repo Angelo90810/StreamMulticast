@@ -111,10 +111,13 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 		obs_log(LOG_INFO, "OBS main stream state changed — reconciling linked endpoints");
 		reconcile_output_lifecycle();
 	} else if (event == OBS_FRONTEND_EVENT_SCENE_CHANGED ||
-	           event == OBS_FRONTEND_EVENT_TRANSITION_CHANGED) {
+	           event == OBS_FRONTEND_EVENT_TRANSITION_CHANGED ||
+	           event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP ||
+	           event == OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED) {
 		/* Rotated endpoints render OBS output channel 0 (the Program
-		 * transition source). Refresh when OBS swaps scene/transition
-		 * objects so animation and Studio Mode Program remain exact. */
+		 * transition source). Refresh when OBS may have swapped that
+		 * object; refresh_program_scene() is a cheap no-op when channel 0
+		 * is unchanged and drops its reference during collection cleanup. */
 		for (auto &ep : g_registry->all()) {
 			auto ctrl = g_registry->controller_for(ep.id);
 			if (ctrl)
@@ -140,6 +143,17 @@ static void on_frontend_event(enum obs_frontend_event event, void * /*private_da
 		}
 		if (g_health_sampler)
 			g_health_sampler->stop();
+
+		/* Remove the dock while the frontend API is still alive. OBS has
+		 * already saved the dock layout (saveAll() runs before this event)
+		 * and clears the frontend callbacks right after it, so the same
+		 * call in obs_module_unload() would be a silent no-op. Removing it
+		 * here also guarantees the dock's child widgets (which reference
+		 * g_registry/g_health_sampler) are gone before those are destroyed. */
+		if (g_dock) {
+			obs_frontend_remove_dock("avanatro_streammulticast");
+			g_dock = nullptr;
+		}
 	}
 }
 
@@ -179,15 +193,9 @@ bool obs_module_load()
 	});
 	g_lifecycle_timer->start();
 
-	/* 6. Create and register the dock widget
-	 * obs_frontend_add_dock_by_id was added in OBS 30.0.
-	 * AVANATRO-VERIFY: Confirm obs_frontend_add_dock_by_id signature in OBS 31.x —
-	 * the 4th parameter (area hint) was added in a later OBS 30.x patch.
-	 * Prototype from OBS 30.0: bool obs_frontend_add_dock_by_id(const char *id,
-	 *   const char *title, QWidget *widget);
-	 * Prototype from OBS 30.2+: bool obs_frontend_add_dock_by_id(const char *id,
-	 *   const char *title, QWidget *widget, Qt::DockWidgetArea area = Qt::RightDockWidgetArea);
-	 * Use 3-arg form for broadest compatibility. */
+	/* 6. Create and register the dock widget.
+	 * obs_frontend_add_dock_by_id(const char *id, const char *title,
+	 * void *widget) — OBS 30.0+, unchanged through OBS 32/33. */
 	g_dock = new smulti::MultistreamDock(*g_registry, *g_health_sampler);
 
 	/* obs_frontend_add_dock_by_id() returns false BEFORE calling setWidget()
@@ -265,7 +273,7 @@ void obs_module_unload()
 	 * explicitly removed; removing it before destroying g_registry avoids a
 	 * dangling EndpointRegistry&/HealthSampler& reference inside the dock's
 	 * child widgets during the teardown below. */
-	if (g_dock)
+	if (g_dock) /* normally already removed on OBS_FRONTEND_EVENT_EXIT */
 		obs_frontend_remove_dock("avanatro_streammulticast");
 	g_dock = nullptr;
 
