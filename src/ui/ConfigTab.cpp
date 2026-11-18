@@ -14,6 +14,7 @@ GPLv2 — see LICENSE for full text.
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QListWidgetItem>
+#include <QtWidgets/QStyle>
 #include <QtCore/QMetaObject>
 #include <QtCore/QTimer>
 
@@ -59,14 +60,27 @@ void EndpointCard::setup_ui()
 	/* Explicit reorder controls. Drag-and-drop on the list only works when
 	 * grabbing the thin margin around a card, because the card's own
 	 * widgets consume the mouse press. */
-	auto move_button = [this](const QString &glyph, const QString &tip) {
-		auto *button = new QPushButton(glyph, this);
-		button->setFixedSize(24, 22);
+	auto move_button = [this](QStyle::StandardPixmap fallback, const char *theme_class,
+	                          const QString &tip) {
+		/* Icon-only, styled like OBS's own filter Move Up/Down buttons: the
+		 * OBS themes (Yami, System and their variants) assign the themed
+		 * up/down SVG through the "btn-tool icon-up|icon-down" classes.
+		 * A text glyph does not work here — the theme's button padding
+		 * clips it to nothing at this size. The Qt standard arrow is only
+		 * a fallback for third-party themes without those classes; a
+		 * theme's qproperty-icon replaces it when the widget is polished. */
+		auto *button = new QPushButton(this);
+		button->setIcon(style()->standardIcon(fallback));
+		button->setProperty("class", theme_class);
+		button->setFlat(true);
+		button->setAutoDefault(false);
+		button->setFixedSize(22, 22);
 		button->setToolTip(tip);
+		button->setAccessibleName(tip);
 		return button;
 	};
-	m_up_btn = move_button(QString(QChar(0x25B2)), tr("Move up"));
-	m_down_btn = move_button(QString(QChar(0x25BC)), tr("Move down"));
+	m_up_btn = move_button(QStyle::SP_ArrowUp, "btn-tool icon-up", tr("Move up"));
+	m_down_btn = move_button(QStyle::SP_ArrowDown, "btn-tool icon-down", tr("Move down"));
 	header->addWidget(m_up_btn);
 	header->addWidget(m_down_btn);
 
